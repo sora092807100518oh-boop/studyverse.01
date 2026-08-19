@@ -1,7 +1,10 @@
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, or } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { announcements, calendarEvents, classrooms, focusSessions, InsertUser, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
+import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
+import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -38,11 +41,98 @@ export async function getUserByOpenId(openId: string) {
   return result[0];
 }
 
+export async function getUserById(userId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const result = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  return result[0];
+}
+
 export async function getProfile(userId: number) {
   const db = await getDb();
   if (!db) return undefined;
   const rows = await db.select({ profile: studentProfiles, classroom: classrooms }).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(eq(studentProfiles.userId, userId)).limit(1);
   return rows[0];
+}
+
+const PIN_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
+const PIN_ATTEMPT_WINDOW_MS = 1000 * 60 * 15;
+const MAX_PIN_ATTEMPTS = 5;
+
+function getPinPepper() { return ENV.cookieSecret; }
+
+export async function createPinAccount(actorUserId: number, input: { classroomId: number; displayName: string; pin: string; classroomRole?: "student" | "teacher" | "owner" }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, actorUserId)).limit(1);
+  const membership = await getProfile(actorUserId);
+  const permissionInput = { siteRole: account[0]?.role, classroomRole: membership?.profile.classroomRole, actorClassroomId: membership?.profile.classroomId, targetClassroomId: input.classroomId } as const;
+  if (!membership && account[0]?.role !== "admin") throw new Error("CLASSROOM_REQUIRED");
+  if (!canManageClassroom(permissionInput)) throw new Error("CLASSROOM_MANAGER_REQUIRED");
+  if (!canPublishGlobally(permissionInput) && input.classroomRole && input.classroomRole !== "student") throw new Error("GLOBAL_MANAGER_REQUIRED");
+  const classroom = await db.select().from(classrooms).where(eq(classrooms.id, input.classroomId)).limit(1);
+  if (!classroom[0]) throw new Error("CLASSROOM_NOT_FOUND");
+  const pinHash = await hashPin(input.pin);
+  const pinLookupHash = getPinLookupHash(input.classroomId, input.pin, getPinPepper());
+  const createdUser = await db.insert(users).values({ openId: `pin:${classroom[0].code}:${randomUUID()}`, name: input.displayName, loginMethod: "pin", role: "user" }).$returningId();
+  const userId = createdUser[0]?.id;
+  if (!userId) throw new Error("ACCOUNT_CREATE_FAILED");
+  try {
+    const created = await db.insert(studentProfiles).values({ userId, classroomId: input.classroomId, pinHash, pinLookupHash, displayName: input.displayName, classroomRole: input.classroomRole ?? "student" }).$returningId();
+    return { profileId: created[0]?.id, userId };
+  } catch (error) {
+    await db.delete(users).where(eq(users.id, userId));
+    throw error;
+  }
+}
+
+export async function resetPinForProfile(actorUserId: number, input: { profileId: number; pin: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const manager = await requireClassroomManager(actorUserId);
+  const target = await db.select().from(studentProfiles).where(eq(studentProfiles.id, input.profileId)).limit(1);
+  if (!target[0]) throw new Error("PROFILE_NOT_FOUND");
+  if (manager.profile.classroomRole !== "owner" && manager.profile.classroomId !== target[0].classroomId) throw new Error("CLASSROOM_MANAGER_REQUIRED");
+  const pinHash = await hashPin(input.pin);
+  const pinLookupHash = getPinLookupHash(target[0].classroomId, input.pin, getPinPepper());
+  await db.update(studentProfiles).set({ pinHash, pinLookupHash }).where(eq(studentProfiles.id, input.profileId));
+  await db.update(pinSessions).set({ revokedAt: new Date() }).where(and(eq(pinSessions.profileId, input.profileId), isNull(pinSessions.revokedAt)));
+}
+
+export async function authenticateWithPin(input: { classroomCode: string; pin: string; clientFingerprint: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const normalizedCode = input.classroomCode.trim().toUpperCase();
+  const attemptKeyHash = getAttemptKeyHash(normalizedCode, input.clientFingerprint, getPinPepper());
+  const after = new Date(Date.now() - PIN_ATTEMPT_WINDOW_MS);
+  const recent = await db.select().from(pinLoginAttempts).where(and(eq(pinLoginAttempts.attemptKeyHash, attemptKeyHash), gte(pinLoginAttempts.attemptedAt, after)));
+  if (recent.filter(attempt => !attempt.succeeded).length >= MAX_PIN_ATTEMPTS) throw new Error("PIN_RATE_LIMITED");
+  const classroom = await db.select().from(classrooms).where(eq(classrooms.code, normalizedCode)).limit(1);
+  const lookupHash = classroom[0] ? getPinLookupHash(classroom[0].id, input.pin, getPinPepper()) : "";
+  const profile = classroom[0] ? await db.select().from(studentProfiles).where(and(eq(studentProfiles.classroomId, classroom[0].id), eq(studentProfiles.pinLookupHash, lookupHash))).limit(1) : [];
+  const valid = !!profile[0] && await verifyPin(input.pin, profile[0].pinHash);
+  await db.insert(pinLoginAttempts).values({ attemptKeyHash, succeeded: valid });
+  if (!valid || !classroom[0] || !profile[0]) throw new Error("INVALID_PIN_LOGIN");
+  const token = createSessionToken();
+  const tokenHash = getSessionTokenHash(token, getPinPepper());
+  const expiresAt = new Date(Date.now() + PIN_SESSION_TTL_MS);
+  await db.insert(pinSessions).values({ tokenHash, profileId: profile[0].id, userId: profile[0].userId, classroomId: classroom[0].id, expiresAt });
+  return { token, expiresAt, profile: { id: profile[0].id, userId: profile[0].userId, displayName: profile[0].displayName, classroomRole: profile[0].classroomRole }, classroom: { id: classroom[0].id, code: classroom[0].code, name: classroom[0].name } };
+}
+
+export async function getPinSession(token: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const tokenHash = getSessionTokenHash(token, getPinPepper());
+  const rows = await db.select({ session: pinSessions, profile: studentProfiles, classroom: classrooms }).from(pinSessions).innerJoin(studentProfiles, eq(pinSessions.profileId, studentProfiles.id)).innerJoin(classrooms, eq(pinSessions.classroomId, classrooms.id)).where(and(eq(pinSessions.tokenHash, tokenHash), isNull(pinSessions.revokedAt), gt(pinSessions.expiresAt, new Date()))).limit(1);
+  if (rows[0]) await db.update(pinSessions).set({ lastSeenAt: new Date() }).where(eq(pinSessions.id, rows[0].session.id));
+  return rows[0];
+}
+
+export async function revokePinSession(token: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(pinSessions).set({ revokedAt: new Date() }).where(eq(pinSessions.tokenHash, getSessionTokenHash(token, getPinPepper())));
 }
 
 export async function requireClassroomManager(userId: number) {
@@ -174,6 +264,26 @@ export async function recordFocusSession(userId: number, input: { startedAt: Dat
   const profile = await getProfile(userId);
   if (!profile) throw new Error("CLASSROOM_REQUIRED");
   await db.insert(focusSessions).values({ userId, classroomId: profile.profile.classroomId, ...input });
+}
+
+export async function saveJournalEntry(userId: number, input: { subject: "english" | "kanji"; difficulty: string; sourceType: "ai" | "news"; sourceTitle?: string; sourceUrl?: string; articleTitle: string; articleBody: string; questions: Array<{ question: string; answer: string; explanation: string }> }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const profile = await getProfile(userId);
+  if (!profile) throw new Error("CLASSROOM_REQUIRED");
+  const inserted = await db.insert(journalEntries).values({ userId, classroomId: profile.profile.classroomId, subject: input.subject, difficulty: input.difficulty, sourceType: input.sourceType, sourceTitle: input.sourceTitle ?? null, sourceUrl: input.sourceUrl ?? null, articleTitle: input.articleTitle, articleBody: input.articleBody, questionsJson: JSON.stringify(input.questions) }).$returningId();
+  return inserted[0];
+}
+
+export async function listJournalEntries(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(journalEntries).where(eq(journalEntries.userId, userId)).orderBy(desc(journalEntries.createdAt)).limit(30);
+  return rows.map(row => {
+    let questions: Array<{ question: string; answer: string; explanation: string }> = [];
+    try { const parsed = JSON.parse(row.questionsJson); if (Array.isArray(parsed)) questions = parsed; } catch { /* 破損した履歴は設問なしとして安全に表示する */ }
+    return { ...row, questions };
+  });
 }
 
 export async function getLearningSummary(userId: number) {

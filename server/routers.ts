@@ -1,7 +1,8 @@
 import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, createAnnouncement, createCalendarEvent, createClassroom, createWordbook, getLearningSummary, listClassroomMembers, listClassroomsForUser, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, recordFocusSession, recordLearningResult, updateClassroom } from "./db";
+import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createWordbook, getLearningSummary, getPinSession, listClassroomMembers, listClassroomsForUser, listJournalEntries, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, saveJournalEntry, updateClassroom } from "./db";
+import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -12,6 +13,11 @@ function toUserMessage(error: unknown): never {
   if (code === "WORD_BOOK_FORBIDDEN") throw new TRPCError({ code: "FORBIDDEN", message: "この単語帳を編集する権限がありません。" });
   if (code === "CLASSROOM_MANAGER_REQUIRED") throw new TRPCError({ code: "FORBIDDEN", message: "この操作は先生または教室管理者のみが実行できます。" });
   if (code === "GLOBAL_MANAGER_REQUIRED") throw new TRPCError({ code: "FORBIDDEN", message: "全体公開は全体管理者のみが実行できます。" });
+  if (code === "PIN_RATE_LIMITED") throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "ログイン試行が多すぎます。15分ほど待ってから再試行してください。" });
+  if (code === "INVALID_PIN_LOGIN") throw new TRPCError({ code: "UNAUTHORIZED", message: "PINまたは教室コードが正しくありません。" });
+  if (code === "PROFILE_NOT_FOUND" || code === "CLASSROOM_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "指定された情報が見つかりません。" });
+  if (code === "NEWS_SOURCE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "今日の記事の取得元に接続できませんでした。通常生成をお試しください。" });
+  if (code === "JOURNAL_GENERATION_FAILED") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "記事を生成できませんでした。時間をおいて再試行してください。" });
   if (code === "DATABASE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "学習データを保存できません。時間をおいて再試行してください。" });
   throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "処理を完了できませんでした。もう一度お試しください。" });
 }
@@ -25,6 +31,29 @@ export const appRouter = router({
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
+    pinLogin: publicProcedure.input(z.object({ pin: z.string().regex(/^\d{4}$/), classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/) })).mutation(async ({ ctx, input }) => {
+      try {
+        const fingerprint = ctx.req.ip ?? ctx.req.socket.remoteAddress ?? "unknown";
+        const result = await authenticateWithPin({ ...input, clientFingerprint: fingerprint });
+        const options = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie("studyverse_pin", result.token, { ...options, maxAge: 12 * 60 * 60 * 1000 });
+        return { profile: result.profile, classroom: result.classroom, expiresAt: result.expiresAt };
+      } catch (error) { return toUserMessage(error); }
+    }),
+    pinMe: publicProcedure.query(async ({ ctx }) => {
+      const token = ctx.req.cookies?.studyverse_pin as string | undefined;
+      if (!token) return null;
+      const result = await getPinSession(token);
+      if (!result) return null;
+      return { profile: { id: result.profile.id, userId: result.profile.userId, displayName: result.profile.displayName, classroomRole: result.profile.classroomRole }, classroom: { id: result.classroom.id, code: result.classroom.code, name: result.classroom.name } };
+    }),
+    pinLogout: publicProcedure.mutation(async ({ ctx }) => {
+      const token = ctx.req.cookies?.studyverse_pin as string | undefined;
+      if (token) await revokePinSession(token);
+      const options = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie("studyverse_pin", { ...options, maxAge: -1 });
+      return { success: true } as const;
+    }),
   }),
   learning: router({
     summary: protectedProcedure.query(async ({ ctx }) => getLearningSummary(ctx.user.id)),
@@ -33,6 +62,17 @@ export const appRouter = router({
     }),
     recordAnswer: protectedProcedure.input(z.object({ wordId: z.number().int().positive().optional(), mode: z.enum(["practice", "test", "journal", "ai_select"]), isCorrect: z.boolean() })).mutation(async ({ ctx, input }) => {
       try { await recordLearningResult(ctx.user.id, input); return { success: true }; } catch (error) { return toUserMessage(error); }
+    }),
+  }),
+  journal: router({
+    list: protectedProcedure.query(async ({ ctx }) => listJournalEntries(ctx.user.id)),
+    generate: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]), difficulty: z.string().trim().min(1).max(40), mode: z.enum(["normal", "today"]) })).mutation(async ({ ctx, input }) => {
+      try {
+        const source = input.mode === "today" ? await fetchTodayNewsSource() : undefined;
+        const article = await generateJournalArticle({ subject: input.subject, difficulty: input.difficulty, source });
+        const saved = await saveJournalEntry(ctx.user.id, { subject: input.subject, difficulty: input.difficulty, sourceType: source ? "news" : "ai", sourceTitle: source?.title, sourceUrl: source?.url, articleTitle: article.title, articleBody: article.body, questions: article.questions });
+        return { id: saved?.id, ...article, source: source ? { title: source.title, url: source.url, domain: source.domain } : null };
+      } catch (error) { return toUserMessage(error); }
     }),
   }),
   wordbooks: router({
@@ -60,6 +100,12 @@ export const appRouter = router({
     members: router({
       list: protectedProcedure.query(async ({ ctx }) => {
         try { return await listClassroomMembers(ctx.user.id); } catch (error) { return toUserMessage(error); }
+      }),
+      createPinAccount: protectedProcedure.input(z.object({ classroomId: z.number().int().positive(), displayName: z.string().trim().min(1).max(80), pin: z.string().regex(/^\d{4}$/), classroomRole: z.enum(["student", "teacher", "owner"]).optional() })).mutation(async ({ ctx, input }) => {
+        try { return await createPinAccount(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
+      }),
+      resetPin: protectedProcedure.input(z.object({ profileId: z.number().int().positive(), pin: z.string().regex(/^\d{4}$/) })).mutation(async ({ ctx, input }) => {
+        try { await resetPinForProfile(ctx.user.id, input); return { success: true }; } catch (error) { return toUserMessage(error); }
       }),
     }),
     announcements: router({
