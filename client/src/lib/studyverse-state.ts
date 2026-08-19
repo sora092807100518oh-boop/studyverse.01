@@ -21,3 +21,27 @@ export function getSwipeOutcome(offsetX: number, threshold = 95): "known" | "rev
   if (offsetX <= -threshold) return "review";
   return null;
 }
+
+export function getElapsedFocusSeconds(startedAtMs: number, nowMs: number, pausedSeconds = 0) {
+  return Math.max(0, Math.floor((nowMs - startedAtMs) / 1000) - pausedSeconds);
+}
+
+export function getFocusTimerRemaining(elapsedSeconds: number, focusSeconds = 25 * 60) {
+  return Math.max(0, focusSeconds - elapsedSeconds);
+}
+
+export function advanceTestSession(index: number, total: number, isCorrect: boolean, known: number, review: number) {
+  const result = { known: known + (isCorrect ? 1 : 0), review: review + (isCorrect ? 0 : 1) };
+  return { ...result, nextIndex: index + 1, completed: index + 1 >= total };
+}
+
+export type StrokePoint = { x: number; y: number };
+export type Stroke = StrokePoint[];
+
+export function undoStroke(strokes: Stroke[]) {
+  return strokes.slice(0, -1);
+}
+
+export function clearStrokes() {
+  return [] as Stroke[];
+}

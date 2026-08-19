@@ -15,6 +15,13 @@
       "when": 1787156883687,
       "tag": "0001_confused_shadow_king",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1787157676696,
+      "tag": "0002_loving_terror",
+      "breakpoints": true
     }
   ]
 }

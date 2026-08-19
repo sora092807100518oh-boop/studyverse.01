@@ -73,6 +73,28 @@ export const focusSessions = mysqlTable("focusSessions", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const announcements = mysqlTable("announcements", {
+  id: int("id").autoincrement().primaryKey(),
+  classroomId: int("classroomId"),
+  authorUserId: int("authorUserId").notNull(),
+  visibility: mysqlEnum("visibility", ["classroom", "global"]).default("classroom").notNull(),
+  title: varchar("title", { length: 160 }).notNull(),
+  body: text("body").notNull(),
+  publishedAt: timestamp("publishedAt").defaultNow().notNull(),
+  expiresAt: timestamp("expiresAt"),
+});
+
+export const calendarEvents = mysqlTable("calendarEvents", {
+  id: int("id").autoincrement().primaryKey(),
+  classroomId: int("classroomId"),
+  authorUserId: int("authorUserId").notNull(),
+  visibility: mysqlEnum("visibility", ["classroom", "global"]).default("classroom").notNull(),
+  title: varchar("title", { length: 160 }).notNull(),
+  startsAt: timestamp("startsAt").notNull(),
+  endsAt: timestamp("endsAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Wordbook = typeof wordbooks.$inferSelect;

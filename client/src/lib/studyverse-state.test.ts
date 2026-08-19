@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deleteStudyWord, getSwipeOutcome, saveStudyWord, searchStudyWords } from "./studyverse-state";
+import { advanceTestSession, clearStrokes, deleteStudyWord, getElapsedFocusSeconds, getFocusTimerRemaining, getSwipeOutcome, saveStudyWord, searchStudyWords, undoStroke } from "./studyverse-state";
 
 const words = [
   { front: "observe", back: "観察する" },
@@ -26,5 +26,27 @@ describe("カードスワイプ", () => {
     expect(getSwipeOutcome(120)).toBe("known");
     expect(getSwipeOutcome(-120)).toBe("review");
     expect(getSwipeOutcome(20)).toBeNull();
+  });
+});
+
+describe("学習タイマー", () => {
+  it("画面遷移後も開始時刻を基準に経過時間と残り時間を計算する", () => {
+    expect(getElapsedFocusSeconds(1_000, 64_900)).toBe(63);
+    expect(getElapsedFocusSeconds(1_000, 64_900, 3)).toBe(60);
+    expect(getFocusTimerRemaining(60)).toBe(1440);
+    expect(getFocusTimerRemaining(2000)).toBe(0);
+  });
+});
+
+describe("テスト進行と手書き回答", () => {
+  it("英単語テストで正誤を集計し、最終問題では結果画面へ遷移する", () => {
+    expect(advanceTestSession(0, 3, true, 0, 0)).toEqual({ nextIndex: 1, known: 1, review: 0, completed: false });
+    expect(advanceTestSession(2, 3, false, 2, 0)).toEqual({ nextIndex: 3, known: 2, review: 1, completed: true });
+  });
+
+  it("漢字キャンバスの一画戻しと全消去を処理する", () => {
+    const strokes = [[{ x: 1, y: 1 }, { x: 2, y: 2 }], [{ x: 4, y: 4 }]];
+    expect(undoStroke(strokes)).toEqual([strokes[0]]);
+    expect(clearStrokes()).toEqual([]);
   });
 });

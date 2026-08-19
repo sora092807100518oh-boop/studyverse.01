@@ -1,6 +1,6 @@
 import { and, desc, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { classrooms, focusSessions, InsertUser, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { announcements, calendarEvents, classrooms, focusSessions, InsertUser, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -43,6 +43,89 @@ export async function getProfile(userId: number) {
   if (!db) return undefined;
   const rows = await db.select({ profile: studentProfiles, classroom: classrooms }).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(eq(studentProfiles.userId, userId)).limit(1);
   return rows[0];
+}
+
+export async function requireClassroomManager(userId: number) {
+  const profile = await getProfile(userId);
+  if (!profile) throw new Error("CLASSROOM_REQUIRED");
+  if (profile.profile.classroomRole !== "teacher" && profile.profile.classroomRole !== "owner") throw new Error("CLASSROOM_MANAGER_REQUIRED");
+  return profile;
+}
+
+export async function listClassroomMembers(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const manager = await requireClassroomManager(userId);
+  return db.select({ id: studentProfiles.id, userId: studentProfiles.userId, displayName: studentProfiles.displayName, classroomRole: studentProfiles.classroomRole, createdAt: studentProfiles.createdAt }).from(studentProfiles).where(eq(studentProfiles.classroomId, manager.profile.classroomId));
+}
+
+export async function requireGlobalAdmin(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const profile = await getProfile(userId);
+  if (account[0]?.role !== "admin" && profile?.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
+}
+
+export async function listClassroomsForUser(userId: number, query?: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const profile = await getProfile(userId);
+  const broadAccess = account[0]?.role === "admin" || profile?.profile.classroomRole === "owner";
+  const base = broadAccess ? db.select().from(classrooms).orderBy(desc(classrooms.createdAt)) : profile ? db.select().from(classrooms).where(eq(classrooms.id, profile.profile.classroomId)) : [];
+  const rows = await base;
+  const normalized = query?.trim().toLocaleLowerCase();
+  return normalized ? rows.filter(classroom => `${classroom.code} ${classroom.name}`.toLocaleLowerCase().includes(normalized)) : rows;
+}
+
+export async function createClassroom(userId: number, input: { code: string; name: string; teacherUserId?: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await requireGlobalAdmin(userId);
+  const result = await db.insert(classrooms).values({ code: input.code.toUpperCase(), name: input.name, teacherUserId: input.teacherUserId ?? null }).$returningId();
+  return result[0];
+}
+
+export async function updateClassroom(userId: number, classroomId: number, input: { name?: string; teacherUserId?: number | null }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await requireGlobalAdmin(userId);
+  await db.update(classrooms).set(input).where(eq(classrooms.id, classroomId));
+}
+
+export async function listVisibleAnnouncements(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const profile = await getProfile(userId);
+  const visible = profile ? or(eq(announcements.visibility, "global"), and(eq(announcements.visibility, "classroom"), eq(announcements.classroomId, profile.profile.classroomId))) : eq(announcements.visibility, "global");
+  return db.select().from(announcements).where(visible).orderBy(desc(announcements.publishedAt));
+}
+
+export async function createAnnouncement(userId: number, input: { title: string; body: string; visibility: "classroom" | "global"; expiresAt?: Date }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const profile = await requireClassroomManager(userId);
+  if (input.visibility === "global" && profile.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
+  const result = await db.insert(announcements).values({ classroomId: input.visibility === "classroom" ? profile.profile.classroomId : null, authorUserId: userId, ...input, expiresAt: input.expiresAt ?? null }).$returningId();
+  return result[0];
+}
+
+export async function listVisibleCalendarEvents(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const profile = await getProfile(userId);
+  const visible = profile ? or(eq(calendarEvents.visibility, "global"), and(eq(calendarEvents.visibility, "classroom"), eq(calendarEvents.classroomId, profile.profile.classroomId))) : eq(calendarEvents.visibility, "global");
+  return db.select().from(calendarEvents).where(visible).orderBy(desc(calendarEvents.startsAt));
+}
+
+export async function createCalendarEvent(userId: number, input: { title: string; startsAt: Date; endsAt?: Date; visibility: "classroom" | "global" }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const profile = await requireClassroomManager(userId);
+  if (input.visibility === "global" && profile.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
+  const result = await db.insert(calendarEvents).values({ classroomId: input.visibility === "classroom" ? profile.profile.classroomId : null, authorUserId: userId, ...input, endsAt: input.endsAt ?? null }).$returningId();
+  return result[0];
 }
 
 export async function listVisibleWordbooks(userId: number, subject?: "english" | "kanji") {
