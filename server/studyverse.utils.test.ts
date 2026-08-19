@@ -1,0 +1,28 @@
+import { describe, expect, it } from "vitest";
+import { classifyCardResult, previewVocabularyRows } from "./studyverse.utils";
+
+describe("previewVocabularyRows", () => {
+  it("BOM・CRLF・タブ区切りを正規化してプレビューする", () => {
+    const rows = previewVocabularyRows("\uFEFFobserve\t観察する\r\nretain\t保持する");
+    expect(rows).toEqual([
+      { line: 1, front: "observe", back: "観察する", valid: true },
+      { line: 2, front: "retain", back: "保持する", valid: true },
+    ]);
+  });
+
+  it("不完全な行には利用者向けの理由を付ける", () => {
+    const [row] = previewVocabularyRows("observe,");
+    expect(row).toMatchObject({ valid: false, reason: "表面と裏面の両方が必要です。" });
+  });
+
+  it("最大件数を超えるCSVを拒否する", () => {
+    expect(() => previewVocabularyRows("a,b\nc,d\ne,f", 2)).toThrow("CSV_LIMIT_EXCEEDED");
+  });
+});
+
+describe("classifyCardResult", () => {
+  it("全角・半角と英字の大文字小文字を吸収して比較する", () => {
+    expect(classifyCardResult(" ＯＢＳＥＲＶＥ ", "observe")).toBe(true);
+    expect(classifyCardResult("analyse", "observe")).toBe(false);
+  });
+});

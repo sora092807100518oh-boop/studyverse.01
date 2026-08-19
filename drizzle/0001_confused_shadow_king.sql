@@ -1,0 +1,2 @@
+ALTER TABLE `studentProfiles` DROP INDEX `studentProfiles_userId_unique`;--> statement-breakpoint
+ALTER TABLE `studentProfiles` ADD CONSTRAINT `studentProfiles_classroom_pin_unique` UNIQUE(`classroomId`,`pinHash`);

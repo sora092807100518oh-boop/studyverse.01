@@ -1,0 +1,78 @@
+import { boolean, int, mysqlEnum, mysqlTable, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
+
+export const users = mysqlTable("users", {
+  id: int("id").autoincrement().primaryKey(),
+  openId: varchar("openId", { length: 64 }).notNull().unique(),
+  name: text("name"),
+  email: varchar("email", { length: 320 }),
+  loginMethod: varchar("loginMethod", { length: 64 }),
+  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+  lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+});
+
+export const classrooms = mysqlTable("classrooms", {
+  id: int("id").autoincrement().primaryKey(),
+  code: varchar("code", { length: 32 }).notNull().unique(),
+  name: varchar("name", { length: 120 }).notNull(),
+  teacherUserId: int("teacherUserId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const studentProfiles = mysqlTable("studentProfiles", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  classroomId: int("classroomId").notNull(),
+  pinHash: varchar("pinHash", { length: 128 }).notNull(),
+  classroomRole: mysqlEnum("classroomRole", ["student", "teacher", "owner"]).default("student").notNull(),
+  displayName: varchar("displayName", { length: 80 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [uniqueIndex("studentProfiles_classroom_pin_unique").on(table.classroomId, table.pinHash)]);
+
+export const wordbooks = mysqlTable("wordbooks", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 160 }).notNull(),
+  subject: mysqlEnum("subject", ["english", "kanji"]).notNull(),
+  visibility: mysqlEnum("visibility", ["private", "classroom", "global"]).default("private").notNull(),
+  ownerUserId: int("ownerUserId"),
+  classroomId: int("classroomId"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const vocabularyWords = mysqlTable("vocabularyWords", {
+  id: int("id").autoincrement().primaryKey(),
+  wordbookId: int("wordbookId").notNull(),
+  front: varchar("front", { length: 500 }).notNull(),
+  back: varchar("back", { length: 500 }).notNull(),
+  reading: varchar("reading", { length: 500 }),
+  source: mysqlEnum("source", ["manual", "csv", "admin"]).default("manual").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const studyRecords = mysqlTable("studyRecords", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  classroomId: int("classroomId").notNull(),
+  wordId: int("wordId"),
+  mode: mysqlEnum("mode", ["practice", "test", "journal", "ai_select"]).notNull(),
+  isCorrect: boolean("isCorrect").notNull(),
+  answeredAt: timestamp("answeredAt").defaultNow().notNull(),
+});
+
+export const focusSessions = mysqlTable("focusSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  classroomId: int("classroomId").notNull(),
+  startedAt: timestamp("startedAt").notNull(),
+  completedAt: timestamp("completedAt").notNull(),
+  focusSeconds: int("focusSeconds").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+export type Wordbook = typeof wordbooks.$inferSelect;
