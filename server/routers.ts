@@ -1,8 +1,8 @@
-import { COOKIE_NAME } from "@shared/const";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createWordbook, getLearningSummary, getPinSession, listClassroomMembers, listClassroomsForUser, listJournalEntries, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, saveJournalEntry, updateClassroom } from "./db";
+import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createSiteAdminSession, createWordbook, getLearningSummary, getPinSession, listClassroomMembers, listClassroomsForUser, listJournalEntries, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, saveJournalEntry, updateClassroom } from "./db";
 import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
+import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
@@ -22,13 +22,42 @@ function toUserMessage(error: unknown): never {
   throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "処理を完了できませんでした。もう一度お試しください。" });
 }
 
+function getRequestCookie(cookieHeader: string | undefined, name: string) {
+  return (cookieHeader ?? "").split(";").map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1);
+}
+
 export const appRouter = router({
   system: systemRouter,
+  siteAdmin: router({
+    check: publicProcedure.input(z.object({ password: z.string().min(1).max(256) })).query(({ input }) => ({ valid: verifySiteAdminPassword(input.password) })),
+    login: publicProcedure.input(z.object({ password: z.string().min(1).max(256) })).mutation(async ({ ctx, input }) => {
+      if (!verifySiteAdminPassword(input.password)) throw new TRPCError({ code: "UNAUTHORIZED", message: "全体管理者パスワードが正しくありません。" });
+      try {
+        const session = await createSiteAdminSession();
+        const options = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie("studyverse_admin", session.token, { ...options, maxAge: 8 * 60 * 60 * 1000 });
+        return { user: { id: session.user.id, name: session.user.name, role: session.user.role }, expiresAt: session.expiresAt };
+      } catch (error) { return toUserMessage(error); }
+    }),
+    me: publicProcedure.query(({ ctx }) => ctx.user?.role === "admin" ? { id: ctx.user.id, name: ctx.user.name, role: ctx.user.role } : null),
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_admin");
+      if (token) await revokeSiteAdminSession(token);
+      const options = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie("studyverse_admin", { ...options, maxAge: -1 });
+      return { success: true } as const;
+    }),
+  }),
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
-    logout: publicProcedure.mutation(({ ctx }) => {
+    logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
-      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      const pinToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_pin");
+      const adminToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_admin");
+      if (pinToken) await revokePinSession(pinToken);
+      if (adminToken) await revokeSiteAdminSession(adminToken);
+      ctx.res.clearCookie("studyverse_pin", { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie("studyverse_admin", { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
     pinLogin: publicProcedure.input(z.object({ pin: z.string().regex(/^\d{4}$/), classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/) })).mutation(async ({ ctx, input }) => {

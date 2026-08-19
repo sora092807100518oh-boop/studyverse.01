@@ -1,10 +1,11 @@
 import { and, desc, eq, gt, gte, isNull, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, siteAdminSessions, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
+import { createSiteAdminSessionToken, getSiteAdminSessionTokenHash } from "./site-admin-auth";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -48,6 +49,42 @@ export async function getUserById(userId: number) {
   return result[0];
 }
 
+const SITE_ADMIN_OPEN_ID = "site-admin";
+const SITE_ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 8;
+
+export async function getOrCreateSiteAdmin() {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await db.insert(users).values({ openId: SITE_ADMIN_OPEN_ID, name: "全体管理者", loginMethod: "site-password", role: "admin", lastSignedIn: new Date() }).onDuplicateKeyUpdate({ set: { role: "admin", lastSignedIn: new Date() } });
+  const user = await getUserByOpenId(SITE_ADMIN_OPEN_ID);
+  if (!user) throw new Error("SITE_ADMIN_UNAVAILABLE");
+  return user;
+}
+
+export async function createSiteAdminSession() {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const user = await getOrCreateSiteAdmin();
+  const token = createSiteAdminSessionToken();
+  const expiresAt = new Date(Date.now() + SITE_ADMIN_SESSION_TTL_MS);
+  await db.insert(siteAdminSessions).values({ tokenHash: getSiteAdminSessionTokenHash(token), userId: user.id, expiresAt });
+  return { token, expiresAt, user };
+}
+
+export async function getSiteAdminSession(token: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select({ session: siteAdminSessions, user: users }).from(siteAdminSessions).innerJoin(users, eq(siteAdminSessions.userId, users.id)).where(and(eq(siteAdminSessions.tokenHash, getSiteAdminSessionTokenHash(token)), isNull(siteAdminSessions.revokedAt), gt(siteAdminSessions.expiresAt, new Date()))).limit(1);
+  if (rows[0]) await db.update(siteAdminSessions).set({ lastSeenAt: new Date() }).where(eq(siteAdminSessions.id, rows[0].session.id));
+  return rows[0];
+}
+
+export async function revokeSiteAdminSession(token: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(siteAdminSessions).set({ revokedAt: new Date() }).where(eq(siteAdminSessions.tokenHash, getSiteAdminSessionTokenHash(token)));
+}
+
 export async function getProfile(userId: number) {
   const db = await getDb();
   if (!db) return undefined;
@@ -89,10 +126,13 @@ export async function createPinAccount(actorUserId: number, input: { classroomId
 export async function resetPinForProfile(actorUserId: number, input: { profileId: number; pin: string }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const manager = await requireClassroomManager(actorUserId);
   const target = await db.select().from(studentProfiles).where(eq(studentProfiles.id, input.profileId)).limit(1);
   if (!target[0]) throw new Error("PROFILE_NOT_FOUND");
-  if (manager.profile.classroomRole !== "owner" && manager.profile.classroomId !== target[0].classroomId) throw new Error("CLASSROOM_MANAGER_REQUIRED");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, actorUserId)).limit(1);
+  const membership = await getProfile(actorUserId);
+  const permissionInput = { siteRole: account[0]?.role, classroomRole: membership?.profile.classroomRole, actorClassroomId: membership?.profile.classroomId, targetClassroomId: target[0].classroomId } as const;
+  if (!membership && account[0]?.role !== "admin") throw new Error("CLASSROOM_REQUIRED");
+  if (!canManageClassroom(permissionInput)) throw new Error("CLASSROOM_MANAGER_REQUIRED");
   const pinHash = await hashPin(input.pin);
   const pinLookupHash = getPinLookupHash(target[0].classroomId, input.pin, getPinPepper());
   await db.update(studentProfiles).set({ pinHash, pinLookupHash }).where(eq(studentProfiles.id, input.profileId));
@@ -145,8 +185,11 @@ export async function requireClassroomManager(userId: number) {
 export async function listClassroomMembers(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const fields = { id: studentProfiles.id, userId: studentProfiles.userId, classroomId: studentProfiles.classroomId, classroomName: classrooms.name, displayName: studentProfiles.displayName, classroomRole: studentProfiles.classroomRole, createdAt: studentProfiles.createdAt };
+  if (account[0]?.role === "admin") return db.select(fields).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id));
   const manager = await requireClassroomManager(userId);
-  return db.select({ id: studentProfiles.id, userId: studentProfiles.userId, displayName: studentProfiles.displayName, classroomRole: studentProfiles.classroomRole, createdAt: studentProfiles.createdAt }).from(studentProfiles).where(eq(studentProfiles.classroomId, manager.profile.classroomId));
+  return db.select(fields).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(eq(studentProfiles.classroomId, manager.profile.classroomId));
 }
 
 export async function requireGlobalAdmin(userId: number) {

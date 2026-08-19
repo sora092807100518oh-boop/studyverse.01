@@ -1,7 +1,6 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
-import { getPinSession, getUserById } from "../db";
-import { sdk } from "./sdk";
+import { getPinSession, getSiteAdminSession, getUserById } from "../db";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -13,24 +12,19 @@ export async function createContext(
   opts: CreateExpressContextOptions
 ): Promise<TrpcContext> {
   let user: User | null = null;
-
-  try {
-    user = await sdk.authenticateRequest(opts.req);
-  } catch (error) {
-    // Authentication is optional for public procedures.
-    user = null;
+  const cookieHeader = opts.req.headers.cookie ?? "";
+  const getCookie = (name: string) => cookieHeader.split(";").map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1);
+  const adminToken = getCookie("studyverse_admin");
+  if (adminToken) {
+    try { user = (await getSiteAdminSession(adminToken))?.user ?? null; } catch (error) { console.warn("[Site Admin Auth] Session lookup failed", String(error)); }
   }
-
   if (!user) {
-    const cookieHeader = opts.req.headers.cookie ?? "";
-    const token = cookieHeader.split(";").map(item => item.trim()).find(item => item.startsWith("studyverse_pin="))?.slice("studyverse_pin=".length);
-    if (token) {
+    const pinToken = getCookie("studyverse_pin");
+    if (pinToken) {
       try {
-        const session = await getPinSession(token);
+        const session = await getPinSession(pinToken);
         if (session) user = await getUserById(session.session.userId) ?? null;
-      } catch (error) {
-        console.warn("[PIN Auth] Session lookup failed", String(error));
-      }
+      } catch (error) { console.warn("[PIN Auth] Session lookup failed", String(error)); }
     }
   }
 

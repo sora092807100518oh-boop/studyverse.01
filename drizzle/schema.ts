@@ -45,6 +45,16 @@ export const pinSessions = mysqlTable("pinSessions", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const siteAdminSessions = mysqlTable("siteAdminSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
+  revokedAt: timestamp("revokedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const pinLoginAttempts = mysqlTable("pinLoginAttempts", {
   id: int("id").autoincrement().primaryKey(),
   attemptKeyHash: varchar("attemptKeyHash", { length: 64 }).notNull(),
