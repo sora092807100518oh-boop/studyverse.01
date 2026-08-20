@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, gte, isNull, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, siteAdminSessions, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, siteAdminSessions, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -98,6 +98,12 @@ const MAX_PIN_ATTEMPTS = 5;
 
 function getPinPepper() { return ENV.cookieSecret; }
 
+async function writeActivity(input: { actorUserId: number; classroomId?: number; category: "classroom" | "member" | "learning" | "journal"; action: string; details?: string }) {
+  const db = await getDb();
+  if (!db) return;
+  await db.insert(activityLogs).values({ actorUserId: input.actorUserId, classroomId: input.classroomId ?? null, category: input.category, action: input.action, details: input.details ?? null });
+}
+
 export async function createPinAccount(actorUserId: number, input: { classroomId: number; displayName: string; pin: string; classroomRole?: "student" | "teacher" | "owner" }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
@@ -137,6 +143,7 @@ export async function resetPinForProfile(actorUserId: number, input: { profileId
   const pinLookupHash = getPinLookupHash(target[0].classroomId, input.pin, getPinPepper());
   await db.update(studentProfiles).set({ pinHash, pinLookupHash }).where(eq(studentProfiles.id, input.profileId));
   await db.update(pinSessions).set({ revokedAt: new Date() }).where(and(eq(pinSessions.profileId, input.profileId), isNull(pinSessions.revokedAt)));
+  await writeActivity({ actorUserId, classroomId: target[0].classroomId, category: "member", action: "pin.reset", details: `profile:${input.profileId}` });
 }
 
 export async function authenticateWithPin(input: { classroomCode: string; pin: string; clientFingerprint: string }) {
@@ -149,8 +156,25 @@ export async function authenticateWithPin(input: { classroomCode: string; pin: s
   if (recent.filter(attempt => !attempt.succeeded).length >= MAX_PIN_ATTEMPTS) throw new Error("PIN_RATE_LIMITED");
   const classroom = await db.select().from(classrooms).where(eq(classrooms.code, normalizedCode)).limit(1);
   const lookupHash = classroom[0] ? getPinLookupHash(classroom[0].id, input.pin, getPinPepper()) : "";
-  const profile = classroom[0] ? await db.select().from(studentProfiles).where(and(eq(studentProfiles.classroomId, classroom[0].id), eq(studentProfiles.pinLookupHash, lookupHash))).limit(1) : [];
-  const valid = !!profile[0] && await verifyPin(input.pin, profile[0].pinHash);
+  let profile = classroom[0] ? await db.select().from(studentProfiles).where(and(eq(studentProfiles.classroomId, classroom[0].id), eq(studentProfiles.pinLookupHash, lookupHash))).limit(1) : [];
+  let valid = !!profile[0] && await verifyPin(input.pin, profile[0].pinHash);
+  if (!profile[0] && classroom[0]) {
+    const pinHash = await hashPin(input.pin);
+    const createdUser = await db.insert(users).values({ openId: `pin:${classroom[0].code}:${randomUUID()}`, name: "学習者", loginMethod: "pin-auto", role: "user" }).$returningId();
+    const userId = createdUser[0]?.id;
+    if (!userId) throw new Error("ACCOUNT_CREATE_FAILED");
+    try {
+      const createdProfile = await db.insert(studentProfiles).values({ userId, classroomId: classroom[0].id, pinHash, pinLookupHash: lookupHash, displayName: `学習者 ${userId}`, classroomRole: "student" }).$returningId();
+      const profileId = createdProfile[0]?.id;
+      profile = profileId ? await db.select().from(studentProfiles).where(eq(studentProfiles.id, profileId)).limit(1) : [];
+      valid = !!profile[0];
+      if (profile[0]) await writeActivity({ actorUserId: userId, classroomId: classroom[0].id, category: "member", action: "member.auto_joined", details: `profile:${profile[0].id}` });
+    } catch (error) {
+      await db.delete(users).where(eq(users.id, userId));
+      profile = await db.select().from(studentProfiles).where(and(eq(studentProfiles.classroomId, classroom[0].id), eq(studentProfiles.pinLookupHash, lookupHash))).limit(1);
+      valid = !!profile[0] && await verifyPin(input.pin, profile[0].pinHash);
+    }
+  }
   await db.insert(pinLoginAttempts).values({ attemptKeyHash, succeeded: valid });
   if (!valid || !classroom[0] || !profile[0]) throw new Error("INVALID_PIN_LOGIN");
   const token = createSessionToken();
@@ -217,7 +241,10 @@ export async function createClassroom(userId: number, input: { code: string; nam
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   await requireGlobalAdmin(userId);
   const result = await db.insert(classrooms).values({ code: input.code.toUpperCase(), name: input.name, teacherUserId: input.teacherUserId ?? null }).$returningId();
-  return result[0];
+  const room = result[0];
+  if (!room) throw new Error("CLASSROOM_CREATE_FAILED");
+  await writeActivity({ actorUserId: userId, classroomId: room.id, category: "classroom", action: "classroom.created", details: `${input.name}｜${input.code.toUpperCase()}` });
+  return room;
 }
 
 export async function updateClassroom(userId: number, classroomId: number, input: { name?: string; teacherUserId?: number | null }) {
@@ -225,6 +252,7 @@ export async function updateClassroom(userId: number, classroomId: number, input
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   await requireGlobalAdmin(userId);
   await db.update(classrooms).set(input).where(eq(classrooms.id, classroomId));
+  await writeActivity({ actorUserId: userId, classroomId, category: "classroom", action: "classroom.updated", details: input.name ?? "担当先生を更新" });
 }
 
 export async function listVisibleAnnouncements(userId: number) {
@@ -299,6 +327,7 @@ export async function recordLearningResult(userId: number, input: { wordId?: num
   const profile = await getProfile(userId);
   if (!profile) throw new Error("CLASSROOM_REQUIRED");
   await db.insert(studyRecords).values({ userId, classroomId: profile.profile.classroomId, wordId: input.wordId ?? null, mode: input.mode, isCorrect: input.isCorrect });
+  await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "learning", action: `answer.${input.mode}`, details: input.isCorrect ? "correct" : "review" });
 }
 
 export async function recordFocusSession(userId: number, input: { startedAt: Date; completedAt: Date; focusSeconds: number }) {
@@ -307,6 +336,7 @@ export async function recordFocusSession(userId: number, input: { startedAt: Dat
   const profile = await getProfile(userId);
   if (!profile) throw new Error("CLASSROOM_REQUIRED");
   await db.insert(focusSessions).values({ userId, classroomId: profile.profile.classroomId, ...input });
+  await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "learning", action: "focus.completed", details: `${input.focusSeconds}s` });
 }
 
 export async function saveJournalEntry(userId: number, input: { subject: "english" | "kanji"; difficulty: string; sourceType: "ai" | "news"; sourceTitle?: string; sourceUrl?: string; articleTitle: string; articleBody: string; questions: Array<{ question: string; answer: string; explanation: string }> }) {
@@ -315,6 +345,7 @@ export async function saveJournalEntry(userId: number, input: { subject: "englis
   const profile = await getProfile(userId);
   if (!profile) throw new Error("CLASSROOM_REQUIRED");
   const inserted = await db.insert(journalEntries).values({ userId, classroomId: profile.profile.classroomId, subject: input.subject, difficulty: input.difficulty, sourceType: input.sourceType, sourceTitle: input.sourceTitle ?? null, sourceUrl: input.sourceUrl ?? null, articleTitle: input.articleTitle, articleBody: input.articleBody, questionsJson: JSON.stringify(input.questions) }).$returningId();
+  await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "journal", action: "journal.generated", details: input.articleTitle });
   return inserted[0];
 }
 
@@ -342,4 +373,21 @@ export async function getLearningSummary(userId: number) {
   let streak = 0;
   for (let offset = 0; offset < 365; offset += 1) { const date = new Date(); date.setUTCDate(date.getUTCDate() - offset); if (activeDays.has(date.toISOString().slice(0, 10))) streak += 1; else if (offset > 0) break; }
   return { totalFocusSeconds, retention, streak, records: records.length };
+}
+
+export async function getManagementInsights(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const profile = await getProfile(userId);
+  if (account[0]?.role !== "admin" && profile?.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
+  const classroomFilter = account[0]?.role === "admin" ? undefined : profile?.profile.classroomId;
+  const [members, sessions, records, journals, logs] = await Promise.all([
+    db.select().from(studentProfiles), db.select().from(focusSessions), db.select().from(studyRecords), db.select().from(journalEntries), db.select({ log: activityLogs, actorName: users.name, classroomName: classrooms.name }).from(activityLogs).leftJoin(users, eq(activityLogs.actorUserId, users.id)).leftJoin(classrooms, eq(activityLogs.classroomId, classrooms.id)).orderBy(desc(activityLogs.createdAt)).limit(40),
+  ]);
+  const include = (classroomId: number) => classroomFilter === undefined || classroomId === classroomFilter;
+  const scopedMembers = members.filter(member => include(member.classroomId)); const scopedSessions = sessions.filter(session => include(session.classroomId)); const scopedRecords = records.filter(record => include(record.classroomId)); const scopedJournals = journals.filter(entry => include(entry.classroomId));
+  const totalFocusSeconds = scopedSessions.reduce((sum, session) => sum + session.focusSeconds, 0);
+  const correct = scopedRecords.filter(record => record.isCorrect).length;
+  return { memberCount: scopedMembers.length, totalFocusSeconds, answers: scopedRecords.length, retention: scopedRecords.length ? Math.round((correct / scopedRecords.length) * 100) : 0, journalCount: scopedJournals.length, recentActivities: logs.filter(row => row.log.classroomId === null || include(row.log.classroomId)).map(row => ({ id: row.log.id, category: row.log.category, action: row.log.action, details: row.log.details, createdAt: row.log.createdAt, actorName: row.actorName ?? "管理者", classroomName: row.classroomName ?? "全体" })) };
 }

@@ -140,6 +140,16 @@ export const calendarEvents = mysqlTable("calendarEvents", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const activityLogs = mysqlTable("activityLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  actorUserId: int("actorUserId").notNull(),
+  classroomId: int("classroomId"),
+  category: mysqlEnum("category", ["classroom", "member", "learning", "journal"]).notNull(),
+  action: varchar("action", { length: 80 }).notNull(),
+  details: text("details"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Wordbook = typeof wordbooks.$inferSelect;

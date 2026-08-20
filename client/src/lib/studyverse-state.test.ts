@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advanceTestSession, clearStrokes, deleteStudyWord, getElapsedFocusSeconds, getFocusTimerRemaining, getSwipeOutcome, saveStudyWord, searchStudyWords, undoStroke } from "./studyverse-state";
+import { advanceTestSession, clearStrokes, deleteStudyWord, getElapsedFocusSeconds, getFocusTimerRemaining, getSwipeOutcome, saveAnswerAndGetProgress, saveStudyWord, searchStudyWords, undoStroke } from "./studyverse-state";
 
 const words = [
   { front: "observe", back: "観察する" },
@@ -48,5 +48,23 @@ describe("テスト進行と手書き回答", () => {
     const strokes = [[{ x: 1, y: 1 }, { x: 2, y: 2 }], [{ x: 4, y: 4 }]];
     expect(undoStroke(strokes)).toEqual([strokes[0]]);
     expect(clearStrokes()).toEqual([]);
+  });
+});
+
+describe("回答記録の保存", () => {
+  it("保存が成功してから次の問題または結果画面向けの進行状態を返す", async () => {
+    let persisted = false;
+    const progress = await saveAnswerAndGetProgress(async () => {
+      persisted = true;
+    }, 1, 2, true, 1, 0);
+
+    expect(persisted).toBe(true);
+    expect(progress).toEqual({ nextIndex: 2, known: 2, review: 0, completed: true });
+  });
+
+  it("保存に失敗した場合は進行状態を返さず、呼び出し側で再試行できる", async () => {
+    await expect(saveAnswerAndGetProgress(async () => {
+      throw new Error("保存に失敗しました");
+    }, 0, 2, false, 0, 0)).rejects.toThrow("保存に失敗しました");
   });
 });

@@ -35,6 +35,18 @@ export function advanceTestSession(index: number, total: number, isCorrect: bool
   return { ...result, nextIndex: index + 1, completed: index + 1 >= total };
 }
 
+export async function saveAnswerAndGetProgress(
+  persist: () => Promise<unknown>,
+  index: number,
+  total: number,
+  isCorrect: boolean,
+  known: number,
+  review: number,
+) {
+  await persist();
+  return advanceTestSession(index, total, isCorrect, known, review);
+}
+
 export type StrokePoint = { x: number; y: number };
 export type Stroke = StrokePoint[];
 

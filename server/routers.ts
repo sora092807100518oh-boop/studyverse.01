@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createSiteAdminSession, createWordbook, getLearningSummary, getPinSession, listClassroomMembers, listClassroomsForUser, listJournalEntries, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, saveJournalEntry, updateClassroom } from "./db";
+import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createSiteAdminSession, createWordbook, getLearningSummary, getManagementInsights, getPinSession, listClassroomMembers, listClassroomsForUser, listJournalEntries, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, saveJournalEntry, updateClassroom } from "./db";
 import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -91,6 +91,11 @@ export const appRouter = router({
     }),
     recordAnswer: protectedProcedure.input(z.object({ wordId: z.number().int().positive().optional(), mode: z.enum(["practice", "test", "journal", "ai_select"]), isCorrect: z.boolean() })).mutation(async ({ ctx, input }) => {
       try { await recordLearningResult(ctx.user.id, input); return { success: true }; } catch (error) { return toUserMessage(error); }
+    }),
+  }),
+  management: router({
+    insights: protectedProcedure.query(async ({ ctx }) => {
+      try { return await getManagementInsights(ctx.user.id); } catch (error) { return toUserMessage(error); }
     }),
   }),
   journal: router({
