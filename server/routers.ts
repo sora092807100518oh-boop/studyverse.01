@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createSiteAdminSession, createWordbook, getLearningSummary, getManagementInsights, getPinSession, listClassroomMembers, listClassroomsForUser, listJournalEntries, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, saveJournalEntry, updateClassroom } from "./db";
+import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createSiteAdminSession, createWordbook, deleteAnnouncement, deleteVocabularyWord, deleteWordbook, getLearningSummary, getLearningTrend, getManagementInsights, getPinSession, importWordbookCsv, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableWordbooks, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, saveJournalEntry, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook } from "./db";
 import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -11,6 +11,7 @@ function toUserMessage(error: unknown): never {
   const code = error instanceof Error ? error.message : "";
   if (code === "CLASSROOM_REQUIRED") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "教室への参加を完了してから利用してください。" });
   if (code === "WORD_BOOK_FORBIDDEN") throw new TRPCError({ code: "FORBIDDEN", message: "この単語帳を編集する権限がありません。" });
+  if (code === "WORD_BOOK_NOT_FOUND" || code === "ANNOUNCEMENT_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "指定された情報が見つかりません。" });
   if (code === "CLASSROOM_MANAGER_REQUIRED") throw new TRPCError({ code: "FORBIDDEN", message: "この操作は先生または教室管理者のみが実行できます。" });
   if (code === "GLOBAL_MANAGER_REQUIRED") throw new TRPCError({ code: "FORBIDDEN", message: "全体公開は全体管理者のみが実行できます。" });
   if (code === "PIN_RATE_LIMITED") throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "ログイン試行が多すぎます。15分ほど待ってから再試行してください。" });
@@ -19,6 +20,8 @@ function toUserMessage(error: unknown): never {
   if (code === "NEWS_SOURCE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "今日の記事の取得元に接続できませんでした。通常生成をお試しください。" });
   if (code === "JOURNAL_GENERATION_FAILED") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "記事を生成できませんでした。時間をおいて再試行してください。" });
   if (code === "DATABASE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "学習データを保存できません。時間をおいて再試行してください。" });
+  if (code === "CSV_INVALID_ROWS") throw new TRPCError({ code: "BAD_REQUEST", message: "形式が正しくない行があります。プレビューを確認して修正してください。" });
+  if (code === "CSV_LIMIT_EXCEEDED") throw new TRPCError({ code: "BAD_REQUEST", message: "CSVは3,000行以内にしてください。" });
   throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "処理を完了できませんでした。もう一度お試しください。" });
 }
 
@@ -92,6 +95,9 @@ export const appRouter = router({
     recordAnswer: protectedProcedure.input(z.object({ wordId: z.number().int().positive().optional(), mode: z.enum(["practice", "test", "journal", "ai_select"]), isCorrect: z.boolean() })).mutation(async ({ ctx, input }) => {
       try { await recordLearningResult(ctx.user.id, input); return { success: true }; } catch (error) { return toUserMessage(error); }
     }),
+    trend: protectedProcedure.input(z.object({ period: z.enum(["day", "week", "month"]) })).query(async ({ ctx, input }) => {
+      try { return await getLearningTrend(ctx.user.id, input.period); } catch (error) { return toUserMessage(error); }
+    }),
   }),
   management: router({
     insights: protectedProcedure.query(async ({ ctx }) => {
@@ -111,11 +117,34 @@ export const appRouter = router({
   }),
   wordbooks: router({
     list: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]).optional() }).optional()).query(async ({ ctx, input }) => listVisibleWordbooks(ctx.user.id, input?.subject)),
-    create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), subject: z.enum(["english", "kanji"]), visibility: z.enum(["private", "classroom"]).default("private") })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), subject: z.enum(["english", "kanji"]), visibility: z.enum(["private", "classroom"]).default("private"), classroomId: z.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
       try { return await createWordbook(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
     }),
     addWord: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), front: z.string().trim().min(1).max(500), back: z.string().trim().min(1).max(500), reading: z.string().trim().max(500).optional(), source: z.enum(["manual", "csv", "admin"]).optional() })).mutation(async ({ ctx, input }) => {
       try { return await addWordToWordbook(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
+    }),
+    updateWord: protectedProcedure.input(z.object({ vocabularyWordId: z.number().int().positive(), front: z.string().trim().min(1).max(500).optional(), back: z.string().trim().min(1).max(500).optional(), reading: z.string().trim().max(500).nullable().optional() })).mutation(async ({ ctx, input }) => {
+      const { vocabularyWordId, ...update } = input;
+      try { await updateVocabularyWord(ctx.user.id, vocabularyWordId, update); return { success: true }; } catch (error) { return toUserMessage(error); }
+    }),
+    deleteWord: protectedProcedure.input(z.object({ vocabularyWordId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      try { await deleteVocabularyWord(ctx.user.id, input.vocabularyWordId); return { success: true }; } catch (error) { return toUserMessage(error); }
+    }),
+    previewCsv: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), csvText: z.string().min(1).max(2_000_000) })).mutation(async ({ ctx, input }) => {
+      try { return await previewWordbookCsv(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
+    }),
+    importCsv: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), csvText: z.string().min(1).max(2_000_000) })).mutation(async ({ ctx, input }) => {
+      try { return await importWordbookCsv(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
+    }),
+    managed: protectedProcedure.query(async ({ ctx }) => {
+      try { return await listManageableWordbooks(ctx.user.id); } catch (error) { return toUserMessage(error); }
+    }),
+    update: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), title: z.string().trim().min(1).max(160).optional(), visibility: z.enum(["private", "classroom"]).optional() })).mutation(async ({ ctx, input }) => {
+      const { wordbookId, ...update } = input;
+      try { await updateWordbook(ctx.user.id, wordbookId, update); return { success: true }; } catch (error) { return toUserMessage(error); }
+    }),
+    delete: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      try { await deleteWordbook(ctx.user.id, input.wordbookId); return { success: true }; } catch (error) { return toUserMessage(error); }
     }),
   }),
   classroom: router({
@@ -144,8 +173,18 @@ export const appRouter = router({
     }),
     announcements: router({
       list: protectedProcedure.query(async ({ ctx }) => listVisibleAnnouncements(ctx.user.id)),
-      create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), body: z.string().trim().min(1).max(5000), visibility: z.enum(["classroom", "global"]).default("classroom"), expiresAt: z.date().optional() })).mutation(async ({ ctx, input }) => {
+      manage: protectedProcedure.query(async ({ ctx }) => {
+        try { return await listManageableAnnouncements(ctx.user.id); } catch (error) { return toUserMessage(error); }
+      }),
+      create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), body: z.string().trim().min(1).max(5000), visibility: z.enum(["classroom", "global"]).default("classroom"), classroomId: z.number().int().positive().optional(), expiresAt: z.date().optional() })).mutation(async ({ ctx, input }) => {
         try { return await createAnnouncement(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
+      }),
+      update: protectedProcedure.input(z.object({ announcementId: z.number().int().positive(), title: z.string().trim().min(1).max(160).optional(), body: z.string().trim().min(1).max(5000).optional(), visibility: z.enum(["classroom", "global"]).optional(), classroomId: z.number().int().positive().optional(), expiresAt: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
+        const { announcementId, ...update } = input;
+        try { await updateAnnouncement(ctx.user.id, announcementId, update); return { success: true }; } catch (error) { return toUserMessage(error); }
+      }),
+      delete: protectedProcedure.input(z.object({ announcementId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        try { await deleteAnnouncement(ctx.user.id, input.announcementId); return { success: true }; } catch (error) { return toUserMessage(error); }
       }),
     }),
     calendar: router({

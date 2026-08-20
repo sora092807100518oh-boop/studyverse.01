@@ -6,6 +6,7 @@ import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
 import { createSiteAdminSessionToken, getSiteAdminSessionTokenHash } from "./site-admin-auth";
+import { previewVocabularyRows } from "./studyverse.utils";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -117,7 +118,7 @@ export async function createPinAccount(actorUserId: number, input: { classroomId
   if (!classroom[0]) throw new Error("CLASSROOM_NOT_FOUND");
   const pinHash = await hashPin(input.pin);
   const pinLookupHash = getPinLookupHash(input.classroomId, input.pin, getPinPepper());
-  const createdUser = await db.insert(users).values({ openId: `pin:${classroom[0].code}:${randomUUID()}`, name: input.displayName, loginMethod: "pin", role: "user" }).$returningId();
+  const createdUser = await db.insert(users).values({ openId: `pin:${input.classroomId}:${randomUUID()}`, name: input.displayName, loginMethod: "pin", role: "user" }).$returningId();
   const userId = createdUser[0]?.id;
   if (!userId) throw new Error("ACCOUNT_CREATE_FAILED");
   try {
@@ -263,13 +264,70 @@ export async function listVisibleAnnouncements(userId: number) {
   return db.select().from(announcements).where(visible).orderBy(desc(announcements.publishedAt));
 }
 
-export async function createAnnouncement(userId: number, input: { title: string; body: string; visibility: "classroom" | "global"; expiresAt?: Date }) {
+async function getAnnouncementManagementScope(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const profile = await requireClassroomManager(userId);
-  if (input.visibility === "global" && profile.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
-  const result = await db.insert(announcements).values({ classroomId: input.visibility === "classroom" ? profile.profile.classroomId : null, authorUserId: userId, ...input, expiresAt: input.expiresAt ?? null }).$returningId();
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const profile = await getProfile(userId);
+  const isAdmin = account[0]?.role === "admin";
+  const isManager = profile?.profile.classroomRole === "teacher" || profile?.profile.classroomRole === "owner";
+  if (!isAdmin && !isManager) throw new Error(profile ? "CLASSROOM_MANAGER_REQUIRED" : "CLASSROOM_REQUIRED");
+  return { isAdmin, profile };
+}
+
+function resolveAnnouncementClassroomId(scope: Awaited<ReturnType<typeof getAnnouncementManagementScope>>, visibility: "classroom" | "global", requestedClassroomId?: number) {
+  if (visibility === "global") {
+    if (!scope.isAdmin && scope.profile?.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
+    return null;
+  }
+  if (scope.isAdmin) {
+    if (!requestedClassroomId) throw new Error("CLASSROOM_REQUIRED");
+    return requestedClassroomId;
+  }
+  return scope.profile?.profile.classroomId;
+}
+
+export async function listManageableAnnouncements(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const scope = await getAnnouncementManagementScope(userId);
+  const where = scope.isAdmin ? undefined : or(eq(announcements.classroomId, scope.profile!.profile.classroomId), eq(announcements.authorUserId, userId));
+  const query = db.select().from(announcements).orderBy(desc(announcements.publishedAt));
+  return where ? query.where(where) : query;
+}
+
+async function requireAnnouncementEditor(userId: number, announcementId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const row = await db.select().from(announcements).where(eq(announcements.id, announcementId)).limit(1);
+  if (!row[0]) throw new Error("ANNOUNCEMENT_NOT_FOUND");
+  const scope = await getAnnouncementManagementScope(userId);
+  if (!scope.isAdmin && row[0].classroomId !== scope.profile?.profile.classroomId && row[0].authorUserId !== userId) throw new Error("CLASSROOM_MANAGER_REQUIRED");
+  return { db, announcement: row[0], scope };
+}
+
+export async function createAnnouncement(userId: number, input: { title: string; body: string; visibility: "classroom" | "global"; expiresAt?: Date; classroomId?: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const scope = await getAnnouncementManagementScope(userId);
+  const classroomId = resolveAnnouncementClassroomId(scope, input.visibility, input.classroomId);
+  const result = await db.insert(announcements).values({ classroomId, authorUserId: userId, title: input.title, body: input.body, visibility: input.visibility, expiresAt: input.expiresAt ?? null }).$returningId();
+  await writeActivity({ actorUserId: userId, classroomId: classroomId ?? undefined, category: "classroom", action: "announcement.created", details: input.title });
   return result[0];
+}
+
+export async function updateAnnouncement(userId: number, announcementId: number, input: { title?: string; body?: string; visibility?: "classroom" | "global"; expiresAt?: Date | null; classroomId?: number }) {
+  const { db, announcement, scope } = await requireAnnouncementEditor(userId, announcementId);
+  const visibility = input.visibility ?? announcement.visibility;
+  const classroomId = input.visibility || input.classroomId !== undefined ? resolveAnnouncementClassroomId(scope, visibility, input.classroomId) : announcement.classroomId;
+  await db.update(announcements).set({ title: input.title, body: input.body, visibility, classroomId, expiresAt: input.expiresAt }).where(eq(announcements.id, announcementId));
+  await writeActivity({ actorUserId: userId, classroomId: classroomId ?? undefined, category: "classroom", action: "announcement.updated", details: input.title ?? announcement.title });
+}
+
+export async function deleteAnnouncement(userId: number, announcementId: number) {
+  const { db, announcement } = await requireAnnouncementEditor(userId, announcementId);
+  await db.delete(announcements).where(eq(announcements.id, announcementId));
+  await writeActivity({ actorUserId: userId, classroomId: announcement.classroomId ?? undefined, category: "classroom", action: "announcement.deleted", details: announcement.title });
 }
 
 export async function listVisibleCalendarEvents(userId: number) {
@@ -303,22 +361,115 @@ export async function listVisibleWordbooks(userId: number, subject?: "english" |
   }));
 }
 
-export async function createWordbook(userId: number, input: { title: string; subject: "english" | "kanji"; visibility: "private" | "classroom" }) {
+async function getWordbookEditor(userId: number, wordbookId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const book = await db.select().from(wordbooks).where(eq(wordbooks.id, wordbookId)).limit(1);
+  if (!book[0]) throw new Error("WORD_BOOK_NOT_FOUND");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const profile = await getProfile(userId);
+  const canEdit = account[0]?.role === "admin" || book[0].ownerUserId === userId || ((profile?.profile.classroomRole === "teacher" || profile?.profile.classroomRole === "owner") && book[0].classroomId === profile.profile.classroomId);
+  if (!canEdit) throw new Error("WORD_BOOK_FORBIDDEN");
+  return { db, book: book[0], isAdmin: account[0]?.role === "admin", profile };
+}
+
+function normalizeVocabularyPair(front: string, back: string) {
+  return `${front.normalize("NFKC").trim().toLocaleLowerCase()}\u0000${back.normalize("NFKC").trim().toLocaleLowerCase()}`;
+}
+
+export async function createWordbook(userId: number, input: { title: string; subject: "english" | "kanji"; visibility: "private" | "classroom"; classroomId?: number }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const profile = await getProfile(userId);
-  if (!profile) throw new Error("CLASSROOM_REQUIRED");
-  const inserted = await db.insert(wordbooks).values({ title: input.title, subject: input.subject, visibility: input.visibility, ownerUserId: userId, classroomId: profile.profile.classroomId }).$returningId();
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const isAdmin = account[0]?.role === "admin";
+  const isManager = profile?.profile.classroomRole === "teacher" || profile?.profile.classroomRole === "owner";
+  if (input.visibility === "classroom" && !isAdmin && !isManager) throw new Error(profile ? "CLASSROOM_MANAGER_REQUIRED" : "CLASSROOM_REQUIRED");
+  const classroomId = input.visibility === "classroom" ? (isAdmin ? input.classroomId : profile?.profile.classroomId) : profile?.profile.classroomId ?? null;
+  if (input.visibility === "classroom" && !classroomId) throw new Error("CLASSROOM_REQUIRED");
+  const inserted = await db.insert(wordbooks).values({ title: input.title, subject: input.subject, visibility: input.visibility, ownerUserId: userId, classroomId }).$returningId();
+  await writeActivity({ actorUserId: userId, classroomId: classroomId ?? undefined, category: "classroom", action: "wordbook.created", details: input.title });
   return inserted[0];
 }
 
 export async function addWordToWordbook(userId: number, input: { wordbookId: number; front: string; back: string; reading?: string; source?: "manual" | "csv" | "admin" }) {
+  const { db, book } = await getWordbookEditor(userId, input.wordbookId);
+  const inserted = await db.insert(vocabularyWords).values({ wordbookId: input.wordbookId, front: input.front, back: input.back, reading: input.reading ?? null, source: input.source ?? "manual" }).$returningId();
+  await writeActivity({ actorUserId: userId, classroomId: book.classroomId ?? undefined, category: "classroom", action: "wordbook.word_added", details: input.front });
+  return inserted[0];
+}
+
+async function getVocabularyWordEditor(userId: number, vocabularyWordId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const book = await db.select().from(wordbooks).where(eq(wordbooks.id, input.wordbookId)).limit(1);
-  if (!book[0] || book[0].ownerUserId !== userId) throw new Error("WORD_BOOK_FORBIDDEN");
-  const inserted = await db.insert(vocabularyWords).values({ wordbookId: input.wordbookId, front: input.front, back: input.back, reading: input.reading ?? null, source: input.source ?? "manual" }).$returningId();
-  return inserted[0];
+  const row = await db.select().from(vocabularyWords).where(eq(vocabularyWords.id, vocabularyWordId)).limit(1);
+  if (!row[0]) throw new Error("WORD_BOOK_NOT_FOUND");
+  const editor = await getWordbookEditor(userId, row[0].wordbookId);
+  return { ...editor, vocabularyWord: row[0] };
+}
+
+export async function updateVocabularyWord(userId: number, vocabularyWordId: number, input: { front?: string; back?: string; reading?: string | null }) {
+  const { db, book, vocabularyWord } = await getVocabularyWordEditor(userId, vocabularyWordId);
+  await db.update(vocabularyWords).set(input).where(eq(vocabularyWords.id, vocabularyWordId));
+  await writeActivity({ actorUserId: userId, classroomId: book.classroomId ?? undefined, category: "classroom", action: "wordbook.word_updated", details: input.front ?? vocabularyWord.front });
+}
+
+export async function deleteVocabularyWord(userId: number, vocabularyWordId: number) {
+  const { db, book, vocabularyWord } = await getVocabularyWordEditor(userId, vocabularyWordId);
+  await db.delete(vocabularyWords).where(eq(vocabularyWords.id, vocabularyWordId));
+  await writeActivity({ actorUserId: userId, classroomId: book.classroomId ?? undefined, category: "classroom", action: "wordbook.word_deleted", details: vocabularyWord.front });
+}
+
+export async function previewWordbookCsv(userId: number, input: { wordbookId: number; csvText: string }) {
+  const { db } = await getWordbookEditor(userId, input.wordbookId);
+  const [existing, parsed] = await Promise.all([db.select({ front: vocabularyWords.front, back: vocabularyWords.back }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, input.wordbookId)), Promise.resolve(previewVocabularyRows(input.csvText))]);
+  const knownPairs = new Set(existing.map(word => normalizeVocabularyPair(word.front, word.back)));
+  const previewPairs = new Set<string>();
+  const rows = parsed.map(row => {
+    if (!row.valid) return { ...row, duplicate: false };
+    const pair = normalizeVocabularyPair(row.front, row.back);
+    const duplicate = knownPairs.has(pair) || previewPairs.has(pair);
+    previewPairs.add(pair);
+    return { ...row, duplicate };
+  });
+  return { rows, validCount: rows.filter(row => row.valid && !row.duplicate).length, duplicateCount: rows.filter(row => row.duplicate).length, invalidCount: rows.filter(row => !row.valid).length };
+}
+
+export async function importWordbookCsv(userId: number, input: { wordbookId: number; csvText: string }) {
+  const { db, book } = await getWordbookEditor(userId, input.wordbookId);
+  const preview = await previewWordbookCsv(userId, input);
+  if (preview.invalidCount) throw new Error("CSV_INVALID_ROWS");
+  const accepted = preview.rows.filter(row => row.valid && !row.duplicate).map(row => ({ wordbookId: input.wordbookId, front: row.front, back: row.back, source: "csv" as const }));
+  if (accepted.length) await db.insert(vocabularyWords).values(accepted);
+  if (accepted.length) await writeActivity({ actorUserId: userId, classroomId: book.classroomId ?? undefined, category: "classroom", action: "wordbook.csv_imported", details: `${accepted.length}語` });
+  return { importedCount: accepted.length, skippedCount: preview.duplicateCount };
+}
+
+export async function listManageableWordbooks(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const profile = await getProfile(userId);
+  const canManage = account[0]?.role === "admin" || profile?.profile.classroomRole === "teacher" || profile?.profile.classroomRole === "owner";
+  if (!canManage) throw new Error(profile ? "CLASSROOM_MANAGER_REQUIRED" : "CLASSROOM_REQUIRED");
+  const where = account[0]?.role === "admin" ? undefined : or(eq(wordbooks.classroomId, profile!.profile.classroomId), eq(wordbooks.ownerUserId, userId));
+  const query = db.select().from(wordbooks).orderBy(desc(wordbooks.updatedAt));
+  const rows = where ? await query.where(where) : await query;
+  return Promise.all(rows.map(async book => ({ ...book, wordCount: (await db.select({ id: vocabularyWords.id }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, book.id))).length })));
+}
+
+export async function updateWordbook(userId: number, wordbookId: number, input: { title?: string; visibility?: "private" | "classroom" }) {
+  const { db, book, isAdmin, profile } = await getWordbookEditor(userId, wordbookId);
+  if (input.visibility === "classroom" && !isAdmin && profile?.profile.classroomRole !== "teacher" && profile?.profile.classroomRole !== "owner") throw new Error("CLASSROOM_MANAGER_REQUIRED");
+  await db.update(wordbooks).set({ title: input.title, visibility: input.visibility }).where(eq(wordbooks.id, wordbookId));
+  await writeActivity({ actorUserId: userId, classroomId: book.classroomId ?? undefined, category: "classroom", action: "wordbook.updated", details: input.title ?? book.title });
+}
+
+export async function deleteWordbook(userId: number, wordbookId: number) {
+  const { db, book } = await getWordbookEditor(userId, wordbookId);
+  await db.delete(vocabularyWords).where(eq(vocabularyWords.wordbookId, wordbookId));
+  await db.delete(wordbooks).where(eq(wordbooks.id, wordbookId));
+  await writeActivity({ actorUserId: userId, classroomId: book.classroomId ?? undefined, category: "classroom", action: "wordbook.deleted", details: book.title });
 }
 
 export async function recordLearningResult(userId: number, input: { wordId?: number; mode: "practice" | "test" | "journal" | "ai_select"; isCorrect: boolean }) {
@@ -373,6 +524,35 @@ export async function getLearningSummary(userId: number) {
   let streak = 0;
   for (let offset = 0; offset < 365; offset += 1) { const date = new Date(); date.setUTCDate(date.getUTCDate() - offset); if (activeDays.has(date.toISOString().slice(0, 10))) streak += 1; else if (offset > 0) break; }
   return { totalFocusSeconds, retention, streak, records: records.length };
+}
+
+type LearningTrendPeriod = "day" | "week" | "month";
+
+function startOfUtcDay(date: Date) { return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())); }
+function startOfUtcWeek(date: Date) { const start = startOfUtcDay(date); start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7)); return start; }
+function startOfUtcMonth(date: Date) { return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)); }
+function getTrendKey(date: Date, period: LearningTrendPeriod) { const start = period === "day" ? startOfUtcDay(date) : period === "week" ? startOfUtcWeek(date) : startOfUtcMonth(date); return start.toISOString().slice(0, 10); }
+function createTrendBuckets(period: LearningTrendPeriod) {
+  const count = period === "day" ? 7 : period === "week" ? 8 : 12;
+  const now = new Date(); const start = period === "day" ? startOfUtcDay(now) : period === "week" ? startOfUtcWeek(now) : startOfUtcMonth(now);
+  return Array.from({ length: count }, (_, offset) => {
+    const date = new Date(start);
+    if (period === "day") date.setUTCDate(date.getUTCDate() - (count - 1 - offset));
+    else if (period === "week") date.setUTCDate(date.getUTCDate() - 7 * (count - 1 - offset));
+    else date.setUTCMonth(date.getUTCMonth() - (count - 1 - offset));
+    const label = period === "month" ? `${date.getUTCFullYear()}/${date.getUTCMonth() + 1}` : `${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
+    return { key: date.toISOString().slice(0, 10), label, focusMinutes: 0, answers: 0, correct: 0, accuracy: 0 };
+  });
+}
+
+export async function getLearningTrend(userId: number, period: LearningTrendPeriod) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const [sessions, records] = await Promise.all([db.select().from(focusSessions).where(eq(focusSessions.userId, userId)), db.select().from(studyRecords).where(eq(studyRecords.userId, userId))]);
+  const points = createTrendBuckets(period); const byKey = new Map(points.map(point => [point.key, point]));
+  for (const session of sessions) { const point = byKey.get(getTrendKey(session.completedAt, period)); if (point) point.focusMinutes += Math.round(session.focusSeconds / 60); }
+  for (const record of records) { const point = byKey.get(getTrendKey(record.answeredAt, period)); if (point) { point.answers += 1; if (record.isCorrect) point.correct += 1; } }
+  return points.map(({ correct, ...point }) => ({ ...point, accuracy: point.answers ? Math.round((correct / point.answers) * 100) : 0 }));
 }
 
 export async function getManagementInsights(userId: number) {

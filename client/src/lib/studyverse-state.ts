@@ -1,4 +1,4 @@
-export type StudyWord = { front: string; back: string; reading?: string; known?: boolean };
+export type StudyWord = { id?: number; front: string; back: string; reading?: string; known?: boolean };
 
 export function searchStudyWords(words: StudyWord[], query: string) {
   const normalized = query.trim().toLocaleLowerCase();
