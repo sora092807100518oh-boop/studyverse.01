@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -843,3 +843,36 @@ export async function getManagementInsights(userId: number) {
   const correct = scopedRecords.filter(record => record.isCorrect).length;
   return { memberCount: scopedMembers.length, totalFocusSeconds, answers: scopedRecords.length, retention: scopedRecords.length ? Math.round((correct / scopedRecords.length) * 100) : 0, journalCount: scopedJournals.length, recentActivities: logs.filter(row => classroomFilter === undefined ? true : row.log.classroomId !== null && include(row.log.classroomId)).map(row => ({ id: row.log.id, category: row.log.category, action: row.log.action, details: row.log.details, createdAt: row.log.createdAt, actorName: row.actorName ?? "管理者", classroomName: row.classroomName ?? "全体" })) };
 }
+
+const japanDateKey = (value: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
+
+export async function listSavedStudySets(userId: number) {
+  const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const [sets, books] = await Promise.all([db.select().from(savedStudySets).where(eq(savedStudySets.userId, userId)).orderBy(desc(savedStudySets.updatedAt)), listVisibleWordbooks(userId)]);
+  return sets.map(set => { const book = books.find(item => item.id === set.wordbookId); return book ? { ...set, wordbookTitle: book.title, subject: book.subject, words: book.words.slice(set.rangeStart - 1, set.rangeEnd) } : null; }).filter((item): item is NonNullable<typeof item> => Boolean(item));
+}
+
+export async function saveStudySet(userId: number, input: { wordbookId: number; rangeStart: number; rangeEnd: number; label: string }) {
+  const books = await listVisibleWordbooks(userId); const book = books.find(item => item.id === input.wordbookId);
+  if (!book) throw new Error("WORD_BOOK_FORBIDDEN");
+  if (input.rangeStart < 1 || input.rangeEnd < input.rangeStart || input.rangeEnd > book.words.length) throw new Error("STUDY_SET_RANGE_INVALID");
+  const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const created = await db.insert(savedStudySets).values({ userId, ...input, label: input.label.trim() || `${book.title} 第${input.rangeStart}〜${input.rangeEnd}語` }).$returningId();
+  return created[0];
+}
+
+export async function deleteSavedStudySet(userId: number, savedStudySetId: number) { const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); await db.delete(savedStudySets).where(and(eq(savedStudySets.id, savedStudySetId), eq(savedStudySets.userId, userId))); }
+
+export async function updateOwnDisplayName(userId: number, displayName: string) { const profile = await getProfile(userId); if (!profile) throw new Error("CLASSROOM_REQUIRED"); const normalized = displayName.trim(); if (!normalized || normalized.length > 80) throw new Error("DISPLAY_NAME_INVALID"); const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); await db.update(studentProfiles).set({ displayName: normalized }).where(eq(studentProfiles.id, profile.profile.id)); return { displayName: normalized }; }
+
+export async function getCalendarDashboard(userId: number) {
+  const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); const profile = await getProfile(userId); if (!profile) throw new Error("CLASSROOM_REQUIRED");
+  const [sessions, records, events, restored] = await Promise.all([db.select().from(focusSessions).where(eq(focusSessions.userId, userId)), db.select().from(studyRecords).where(eq(studyRecords.userId, userId)), listVisibleCalendarEvents(userId), db.select().from(revivalDays).where(eq(revivalDays.userId, userId))]);
+  const days = new Map<string, { focusSeconds: number; answers: number; events: Array<{ id: number; title: string; startsAt: Date; endsAt: Date | null }> }>();
+  for (const session of sessions) { const key = japanDateKey(session.completedAt); const day = days.get(key) ?? { focusSeconds: 0, answers: 0, events: [] }; day.focusSeconds += session.focusSeconds; days.set(key, day); }
+  for (const record of records) { const key = japanDateKey(record.answeredAt); const day = days.get(key) ?? { focusSeconds: 0, answers: 0, events: [] }; day.answers += 1; days.set(key, day); }
+  for (const event of events) { const key = japanDateKey(event.startsAt); const day = days.get(key) ?? { focusSeconds: 0, answers: 0, events: [] }; day.events.push({ id: event.id, title: event.title, startsAt: event.startsAt, endsAt: event.endsAt }); days.set(key, day); }
+  return { days: Array.from(days, ([dateKey, value]) => ({ dateKey, ...value, revived: restored.some((item: { dateKey: string }) => item.dateKey === dateKey) })), revivalTickets: profile.profile.revivalTickets, futureEvents: (events as Array<{ id: number; title: string; startsAt: Date; endsAt: Date | null }>).filter((event) => event.startsAt >= new Date()).sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime()) };
+}
+
+export async function useRevivalTicket(userId: number, dateKey: string) { const profile = await getProfile(userId); if (!profile) throw new Error("CLASSROOM_REQUIRED"); if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new Error("REVIVAL_DATE_INVALID"); if (profile.profile.revivalTickets < 1) throw new Error("REVIVAL_TICKET_EMPTY"); const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); await db.insert(revivalDays).values({ userId, dateKey }); await db.update(studentProfiles).set({ revivalTickets: profile.profile.revivalTickets - 1 }).where(eq(studentProfiles.id, profile.profile.id)); }

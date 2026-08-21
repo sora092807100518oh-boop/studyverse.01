@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { addWordToWordbook, authenticateWithPin, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveJournalEntry, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
+import { deleteSavedStudySet, getCalendarDashboard, listSavedStudySets, saveStudySet, updateOwnDisplayName, useRevivalTicket } from "./db";
 import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -38,6 +39,20 @@ function getRequestCookie(cookieHeader: string | undefined, name: string) {
 }
 
 export const appRouter = router({
+  studySets: router({
+    list: protectedProcedure.query(async ({ ctx }) => listSavedStudySets(ctx.user.id)),
+    create: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), rangeStart: z.number().int().positive(), rangeEnd: z.number().int().positive(), label: z.string().trim().max(160).optional() })).mutation(async ({ ctx, input }) => {
+      try { return await saveStudySet(ctx.user.id, { ...input, label: input.label ?? "" }); } catch (error) { return toUserMessage(error); }
+    }),
+    delete: protectedProcedure.input(z.object({ savedStudySetId: z.number().int().positive() })).mutation(async ({ ctx, input }) => { await deleteSavedStudySet(ctx.user.id, input.savedStudySetId); return { success: true }; }),
+  }),
+  profile: router({
+    updateName: protectedProcedure.input(z.object({ displayName: z.string().trim().min(1).max(80) })).mutation(async ({ ctx, input }) => { try { return await updateOwnDisplayName(ctx.user.id, input.displayName); } catch (error) { return toUserMessage(error); } }),
+  }),
+  calendar: router({
+    dashboard: protectedProcedure.query(async ({ ctx }) => getCalendarDashboard(ctx.user.id)),
+    useRevivalTicket: protectedProcedure.input(z.object({ dateKey: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })).mutation(async ({ ctx, input }) => { try { await useRevivalTicket(ctx.user.id, input.dateKey); return { success: true }; } catch (error) { return toUserMessage(error); } }),
+  }),
   system: systemRouter,
   siteAdmin: router({
     check: publicProcedure.input(z.object({ password: z.string().min(1).max(256) })).query(({ input }) => ({ valid: verifySiteAdminPassword(input.password) })),

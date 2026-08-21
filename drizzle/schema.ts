@@ -29,6 +29,7 @@ export const studentProfiles = mysqlTable("studentProfiles", {
   pinLookupHash: varchar("pinLookupHash", { length: 64 }).notNull(),
   classroomRole: mysqlEnum("classroomRole", ["student", "teacher", "owner"]).default("student").notNull(),
   displayName: varchar("displayName", { length: 80 }),
+  revivalTickets: int("revivalTickets").default(2).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [uniqueIndex("studentProfiles_classroom_pin_lookup_unique").on(table.classroomId, table.pinLookupHash)]);
@@ -165,6 +166,24 @@ export const recommendedTests = mysqlTable("recommendedTests", {
   availableUntil: timestamp("availableUntil"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+export const savedStudySets = mysqlTable("savedStudySets", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  wordbookId: int("wordbookId").notNull(),
+  rangeStart: int("rangeStart").notNull(),
+  rangeEnd: int("rangeEnd").notNull(),
+  label: varchar("label", { length: 160 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const revivalDays = mysqlTable("revivalDays", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  dateKey: varchar("dateKey", { length: 10 }).notNull(),
+  usedAt: timestamp("usedAt").defaultNow().notNull(),
+}, table => [uniqueIndex("revival_days_user_date_unique").on(table.userId, table.dateKey)]);
 
 export const activityLogs = mysqlTable("activityLogs", {
   id: int("id").autoincrement().primaryKey(),
