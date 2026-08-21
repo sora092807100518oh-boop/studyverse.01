@@ -19,7 +19,7 @@ export const classrooms = mysqlTable("classrooms", {
   teacherUserId: int("teacherUserId"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
+}, table => [uniqueIndex("classrooms_teacher_user_id_unique").on(table.teacherUserId)]);
 
 export const studentProfiles = mysqlTable("studentProfiles", {
   id: int("id").autoincrement().primaryKey(),
@@ -49,6 +49,18 @@ export const siteAdminSessions = mysqlTable("siteAdminSessions", {
   id: int("id").autoincrement().primaryKey(),
   tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
   userId: int("userId").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
+  revokedAt: timestamp("revokedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const teacherAdminSessions = mysqlTable("teacherAdminSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  classroomId: int("classroomId").notNull(),
+  teacherId: int("teacherId").notNull(),
   expiresAt: timestamp("expiresAt").notNull(),
   lastSeenAt: timestamp("lastSeenAt").defaultNow().notNull(),
   revokedAt: timestamp("revokedAt"),

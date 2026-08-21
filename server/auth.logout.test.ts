@@ -48,8 +48,8 @@ describe("auth.logout", () => {
     const result = await caller.auth.logout();
 
     expect(result).toEqual({ success: true });
-    expect(clearedCookies).toHaveLength(2);
-    expect(clearedCookies.map(cookie => cookie.name)).toEqual(["studyverse_pin", "studyverse_admin"]);
+    expect(clearedCookies).toHaveLength(3);
+    expect(clearedCookies.map(cookie => cookie.name)).toEqual(["studyverse_pin", "studyverse_admin", "studyverse_teacher"]);
     expect(clearedCookies[0]?.options).toMatchObject({
       maxAge: -1,
       secure: true,

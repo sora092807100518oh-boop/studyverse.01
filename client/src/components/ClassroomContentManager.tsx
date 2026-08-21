@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { BookOpen, Megaphone, Plus, Save, Trash2 } from "lucide-react";
+import { BookOpen, Clock3, Megaphone, Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
@@ -15,6 +15,13 @@ function getScheduledAt(value: string) {
   return Number.isNaN(date.getTime()) ? undefined : date;
 }
 
+const announcementHistoryLabel: Record<string, string> = { "announcement.created": "配信を作成", "announcement.updated": "配信を更新", "announcement.deleted": "配信を削除" };
+
+export function AnnouncementHistoryPanel() {
+  const history = trpc.classroom.announcements.history.useQuery(undefined, { retry: false, staleTime: 20_000 });
+  return <section className="glass-card rounded-[24px] p-4"><div className="flex items-start gap-3"><div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-300/12 text-violet-100"><Clock3 className="h-5 w-5" /></div><div><p className="text-sm font-bold">お知らせ履歴</p><p className="mt-1 text-xs leading-5 text-slate-400">作成・更新・削除の操作を新しい順に表示します。</p></div></div><div className="mt-4 space-y-2">{history.isLoading ? <p className="text-xs text-slate-400">履歴を読み込んでいます…</p> : history.isError ? <div className="rounded-xl bg-red-400/10 p-3"><p className="text-xs text-red-100">履歴を取得できませんでした。</p><button onClick={() => void history.refetch()} className="mt-2 text-xs font-bold text-red-100 underline">再試行</button></div> : (history.data ?? []).length ? (history.data ?? []).map(item => <div key={item.id} className="rounded-xl bg-slate-950/30 p-3"><div className="flex items-center justify-between gap-3"><p className="text-xs font-bold text-cyan-100">{announcementHistoryLabel[item.action] ?? item.action}</p><time className="shrink-0 text-[10px] text-slate-500">{new Date(item.createdAt).toLocaleString("ja-JP")}</time></div><p className="mt-1 text-sm text-slate-200">{item.details ?? "お知らせ"}</p><p className="mt-1 text-[10px] text-slate-400">{item.classroomName}・{item.actorName}</p></div>) : <p className="rounded-xl bg-slate-950/30 p-3 text-xs text-slate-400">まだお知らせの操作履歴はありません。</p>}</div></section>;
+}
+
 export function ClassroomContentManager({ section }: { section: "wordbooks" | "announcements" }) {
   const utils = trpc.useUtils();
   const rooms = trpc.classroom.rooms.list.useQuery(undefined, { retry: false });
@@ -26,7 +33,7 @@ export function ClassroomContentManager({ section }: { section: "wordbooks" | "a
   const [announcementForm, setAnnouncementForm] = useState({ id: 0, title: "", body: "", visibility: "classroom" as "classroom" | "global", classroomId: "", scheduledAt: "" });
   const [announcementError, setAnnouncementError] = useState("");
   const invalidateBooks = async () => { await Promise.all([utils.wordbooks.managed.invalidate(), utils.wordbooks.list.invalidate()]); };
-  const invalidateAnnouncements = async () => { await Promise.all([utils.classroom.announcements.manage.invalidate(), utils.classroom.announcements.list.invalidate()]); };
+  const invalidateAnnouncements = async () => { await Promise.all([utils.classroom.announcements.manage.invalidate(), utils.classroom.announcements.list.invalidate(), utils.classroom.announcements.history.invalidate()]); };
   const resetBook = () => setBookForm({ id: 0, title: "", subject: "english", visibility: "classroom", classroomId: "" });
   const resetAnnouncement = () => { setAnnouncementForm({ id: 0, title: "", body: "", visibility: "classroom", classroomId: "", scheduledAt: "" }); setAnnouncementError(""); };
   const saveBook = async (event: React.FormEvent) => { event.preventDefault(); if (!bookForm.title.trim()) return toast.error("教材名を入力してください。"); try { if (bookForm.id) await updateBook.mutateAsync({ wordbookId: bookForm.id, title: bookForm.title.trim(), visibility: bookForm.visibility }); else await createBook.mutateAsync({ title: bookForm.title.trim(), subject: bookForm.subject, visibility: bookForm.visibility, classroomId: bookForm.classroomId ? Number(bookForm.classroomId) : undefined }); await invalidateBooks(); resetBook(); toast.success(bookForm.id ? "教材を更新しました。" : "教室教材を保存しました。"); } catch (error) { toast.error(error instanceof Error ? error.message : "教材を保存できませんでした。"); } };

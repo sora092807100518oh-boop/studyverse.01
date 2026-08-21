@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authenticateWithPin, createClassroom, createPinAccount, getDb, getManagementInsights, getOrCreateSiteAdmin, recordLearningResult, resetPinForProfile, saveJournalEntry } from "./db";
+import { authenticateWithPin, createClassroom, createPinAccount, getDb, getManagementInsights, getOrCreateSiteAdmin, listJournalEntries, recordLearningResult, resetPinForProfile, saveJournalEntry } from "./db";
 import { activityLogs, classrooms, focusSessions, journalEntries, pinSessions, studentProfiles, studyRecords, users } from "../drizzle/schema";
 import { inArray } from "drizzle-orm";
 import { afterAll } from "vitest";
@@ -84,6 +84,10 @@ describe("独立全体管理者の教室初期設定フロー", () => {
     createdRoomIds.add(room.id);
     const saved = await saveJournalEntry(admin.id, { subject: "english", difficulty: "basic", sourceType: "news", articleTitle: "Fallback save", articleBody: "A neutral reading passage for verifying that a site administrator can save a journal entry even without a classroom profile.", questions: [{ question: "Q1", answer: "A1", explanation: "E1" }, { question: "Q2", answer: "A2", explanation: "E2" }, { question: "Q3", answer: "A3", explanation: "E3" }] });
     expect(saved.id).toBeGreaterThan(0);
+    const kanjiTitle = `漢字フィルター確認 ${suffix}`;
+    await saveJournalEntry(admin.id, { subject: "kanji", difficulty: "basic", sourceType: "ai", articleTitle: kanjiTitle, articleBody: "漢字の読解確認用です。", questions: [{ question: "Q1", answer: "A1", explanation: "E1" }, { question: "Q2", answer: "A2", explanation: "E2" }, { question: "Q3", answer: "A3", explanation: "E3" }] });
+    expect((await listJournalEntries(admin.id, "kanji")).some(entry => entry.articleTitle === kanjiTitle)).toBe(true);
+    expect((await listJournalEntries(admin.id, "english")).some(entry => entry.articleTitle === kanjiTitle)).toBe(false);
   }, 15_000);
 
   it("カード練習・テストの正誤履歴を保存し、管理記録から確認できる", async () => {

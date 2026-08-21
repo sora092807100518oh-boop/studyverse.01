@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createSiteAdminSession, createWordbook, deleteAnnouncement, deleteVocabularyWord, deleteWordbook, getLearningSummary, getLearningTrend, getManagementInsights, getPinSession, importWordbookCsv, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableWordbooks, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, saveJournalEntry, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook } from "./db";
+import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteVocabularyWord, deleteWordbook, getLearningSummary, getLearningTrend, getManagementInsights, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableWordbooks, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveJournalEntry, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook } from "./db";
 import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -16,6 +16,7 @@ function toUserMessage(error: unknown): never {
   if (code === "GLOBAL_MANAGER_REQUIRED") throw new TRPCError({ code: "FORBIDDEN", message: "全体公開は全体管理者のみが実行できます。" });
   if (code === "PIN_RATE_LIMITED") throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "ログイン試行が多すぎます。15分ほど待ってから再試行してください。" });
   if (code === "INVALID_PIN_LOGIN") throw new TRPCError({ code: "UNAUTHORIZED", message: "PINまたは教室コードが正しくありません。" });
+  if (code === "TEACHER_ID_NOT_FOUND") throw new TRPCError({ code: "UNAUTHORIZED", message: "先生IDが正しくないか、担当教室が設定されていません。" });
   if (code === "PROFILE_NOT_FOUND" || code === "CLASSROOM_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "指定された情報が見つかりません。" });
   if (code === "NEWS_SOURCE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "今日の記事の取得元に接続できませんでした。通常生成をお試しください。" });
   if (code === "JOURNAL_GENERATION_FAILED") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "記事を生成できませんでした。時間をおいて再試行してください。" });
@@ -51,16 +52,42 @@ export const appRouter = router({
       return { success: true } as const;
     }),
   }),
+  teacherAdmin: router({
+    login: publicProcedure.input(z.object({ teacherId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      try {
+        const session = await createTeacherAdminSession(input.teacherId);
+        const options = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie("studyverse_teacher", session.token, { ...options, maxAge: 8 * 60 * 60 * 1000 });
+        return { teacher: { id: session.user.id, name: session.user.name, classroomId: session.classroom.id, classroomName: session.classroom.name, classroomCode: session.classroom.code }, expiresAt: session.expiresAt };
+      } catch (error) { return toUserMessage(error); }
+    }),
+    me: publicProcedure.query(async ({ ctx }) => {
+      const token = ctx.req.cookies?.studyverse_teacher as string | undefined;
+      if (!token) return null;
+      const session = await getTeacherAdminSession(token);
+      return session ? { teacher: { id: session.user.id, name: session.user.name, classroomId: session.classroom.id, classroomName: session.classroom.name, classroomCode: session.classroom.code } } : null;
+    }),
+    logout: publicProcedure.mutation(async ({ ctx }) => {
+      const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_teacher");
+      if (token) await revokeTeacherAdminSession(token);
+      const options = getSessionCookieOptions(ctx.req);
+      ctx.res.clearCookie("studyverse_teacher", { ...options, maxAge: -1 });
+      return { success: true } as const;
+    }),
+  }),
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       const pinToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_pin");
       const adminToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_admin");
+      const teacherToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_teacher");
       if (pinToken) await revokePinSession(pinToken);
       if (adminToken) await revokeSiteAdminSession(adminToken);
+      if (teacherToken) await revokeTeacherAdminSession(teacherToken);
       ctx.res.clearCookie("studyverse_pin", { ...cookieOptions, maxAge: -1 });
       ctx.res.clearCookie("studyverse_admin", { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie("studyverse_teacher", { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
     pinLogin: publicProcedure.input(z.object({ pin: z.string().regex(/^\d{4}$/), classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/) })).mutation(async ({ ctx, input }) => {
@@ -105,7 +132,7 @@ export const appRouter = router({
     }),
   }),
   journal: router({
-    list: protectedProcedure.query(async ({ ctx }) => listJournalEntries(ctx.user.id)),
+    list: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]).optional() }).optional()).query(async ({ ctx, input }) => listJournalEntries(ctx.user.id, input?.subject)),
     generate: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]), difficulty: z.string().trim().min(1).max(40), mode: z.enum(["normal", "today"]) })).mutation(async ({ ctx, input }) => {
       try {
         const source = input.mode === "today" ? await fetchTodayNewsSource() : undefined;
@@ -175,6 +202,9 @@ export const appRouter = router({
       list: protectedProcedure.query(async ({ ctx }) => listVisibleAnnouncements(ctx.user.id)),
       manage: protectedProcedure.query(async ({ ctx }) => {
         try { return await listManageableAnnouncements(ctx.user.id); } catch (error) { return toUserMessage(error); }
+      }),
+      history: protectedProcedure.query(async ({ ctx }) => {
+        try { return await listAnnouncementHistory(ctx.user.id); } catch (error) { return toUserMessage(error); }
       }),
       create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), body: z.string().trim().min(1).max(5000), visibility: z.enum(["classroom", "global"]).default("classroom"), classroomId: z.number().int().positive().optional(), scheduledAt: z.date().optional(), expiresAt: z.date().optional() })).mutation(async ({ ctx, input }) => {
         try { return await createAnnouncement(ctx.user.id, input); } catch (error) { return toUserMessage(error); }

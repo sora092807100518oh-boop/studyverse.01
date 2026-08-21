@@ -10,11 +10,12 @@ const hooks = vi.hoisted(() => ({
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ wordbooks: { managed: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate } }, classroom: { announcements: { manage: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate } } } }),
+    useUtils: () => ({ wordbooks: { managed: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate } }, classroom: { announcements: { manage: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate }, history: { invalidate: hooks.invalidate } } } }),
     classroom: {
       rooms: { list: { useQuery: () => ({ data: [{ id: 5, name: "検証教室", code: "UI-TEST" }], isLoading: false, isError: false }) } },
       announcements: {
         manage: { useQuery: () => ({ data: [], isLoading: false, isError: false }) },
+        history: { useQuery: () => ({ data: [], isLoading: false, isError: false, refetch: hooks.invalidate }) },
         create: { useMutation: () => ({ mutateAsync: hooks.createAnnouncement, isPending: false }) },
         update: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
         delete: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },

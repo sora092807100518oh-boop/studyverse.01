@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { activityLogs, announcements, classrooms, focusSessions, journalEntries, pinSessions, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
-import { createAnnouncement, createClassroom, createPinAccount, createWordbook, deleteAnnouncement, deleteWordbook, getDb, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listManageableAnnouncements, listManageableWordbooks, listVisibleAnnouncements, previewWordbookCsv, recordFocusSession, recordLearningResult, updateAnnouncement, updateWordbook } from "./db";
+import { createAnnouncement, createClassroom, createPinAccount, createWordbook, deleteAnnouncement, deleteWordbook, getDb, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableWordbooks, listVisibleAnnouncements, previewWordbookCsv, recordFocusSession, recordLearningResult, updateAnnouncement, updateWordbook } from "./db";
 
 const createdClassroomIds = new Set<number>();
 const createdUserIds = new Set<number>();
@@ -61,6 +61,8 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     const announcement = await createAnnouncement(admin.id, { title: "学習のお知らせ", body: "今週の目標を確認しましょう。", visibility: "classroom", classroomId: room.id });
     await updateAnnouncement(admin.id, announcement.id, { title: "更新済みお知らせ", body: "学習記録を見返しましょう。" });
     expect((await listManageableAnnouncements(admin.id)).find(item => item.id === announcement.id)?.title).toBe("更新済みお知らせ");
+    const historyAfterUpdate = await listAnnouncementHistory(admin.id);
+    expect(historyAfterUpdate.filter(item => item.details === "学習のお知らせ" || item.details === "更新済みお知らせ").map(item => item.action)).toEqual(expect.arrayContaining(["announcement.created", "announcement.updated"]));
     const scheduled = await createAnnouncement(admin.id, { title: "予約中お知らせ", body: "指定時刻まで公開されません。", visibility: "classroom", classroomId: room.id, scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000) });
     expect((await listVisibleAnnouncements(account.userId)).some(item => item.id === scheduled.id)).toBe(false);
     await updateAnnouncement(admin.id, scheduled.id, { scheduledAt: new Date(Date.now() - 60_000) });
@@ -74,5 +76,6 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     await deleteAnnouncement(admin.id, announcement.id);
     await deleteAnnouncement(admin.id, scheduled.id);
     expect((await listManageableAnnouncements(admin.id)).find(item => item.id === announcement.id)).toBeUndefined();
+    expect((await listAnnouncementHistory(admin.id)).some(item => item.action === "announcement.deleted" && item.details === "更新済みお知らせ")).toBe(true);
   }, 15_000);
 });

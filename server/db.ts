@@ -1,11 +1,12 @@
 import { and, desc, eq, gt, gte, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, siteAdminSessions, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
 import { createSiteAdminSessionToken, getSiteAdminSessionTokenHash } from "./site-admin-auth";
+import { createTeacherAdminSessionToken, getTeacherAdminSessionTokenHash } from "./teacher-admin-auth";
 import { previewVocabularyRows } from "./studyverse.utils";
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -52,6 +53,7 @@ export async function getUserById(userId: number) {
 
 const SITE_ADMIN_OPEN_ID = "site-admin";
 const SITE_ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 8;
+const TEACHER_ADMIN_SESSION_TTL_MS = 1000 * 60 * 60 * 8;
 
 export async function getOrCreateSiteAdmin() {
   const db = await getDb();
@@ -84,6 +86,40 @@ export async function revokeSiteAdminSession(token: string) {
   const db = await getDb();
   if (!db) return;
   await db.update(siteAdminSessions).set({ revokedAt: new Date() }).where(eq(siteAdminSessions.tokenHash, getSiteAdminSessionTokenHash(token)));
+}
+
+export async function createTeacherAdminSession(teacherId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const classroom = (await db.select().from(classrooms).where(eq(classrooms.teacherUserId, teacherId)).limit(1))[0];
+  if (!classroom) throw new Error("TEACHER_ID_NOT_FOUND");
+  const teacherOpenId = `teacher-admin:${teacherId}`;
+  await db.insert(users).values({ openId: teacherOpenId, name: `先生 #${teacherId}`, loginMethod: "teacher-id", role: "user", lastSignedIn: new Date() }).onDuplicateKeyUpdate({ set: { name: `先生 #${teacherId}`, lastSignedIn: new Date() } });
+  const user = await getUserByOpenId(teacherOpenId);
+  if (!user) throw new Error("TEACHER_SESSION_UNAVAILABLE");
+  const profile = (await db.select().from(studentProfiles).where(and(eq(studentProfiles.userId, user.id), eq(studentProfiles.classroomId, classroom.id))).limit(1))[0];
+  if (!profile) {
+    const internalPin = `teacher:${teacherId}:${randomUUID()}`;
+    await db.insert(studentProfiles).values({ userId: user.id, classroomId: classroom.id, pinHash: await hashPin(internalPin), pinLookupHash: `teacher-session:${teacherId}`, displayName: `先生 #${teacherId}`, classroomRole: "teacher" });
+  }
+  const token = createTeacherAdminSessionToken();
+  const expiresAt = new Date(Date.now() + TEACHER_ADMIN_SESSION_TTL_MS);
+  await db.insert(teacherAdminSessions).values({ tokenHash: getTeacherAdminSessionTokenHash(token), userId: user.id, classroomId: classroom.id, teacherId, expiresAt });
+  return { token, expiresAt, user, classroom };
+}
+
+export async function getTeacherAdminSession(token: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const rows = await db.select({ session: teacherAdminSessions, user: users, classroom: classrooms }).from(teacherAdminSessions).innerJoin(users, eq(teacherAdminSessions.userId, users.id)).innerJoin(classrooms, and(eq(classrooms.id, teacherAdminSessions.classroomId), eq(classrooms.teacherUserId, teacherAdminSessions.teacherId))).where(and(eq(teacherAdminSessions.tokenHash, getTeacherAdminSessionTokenHash(token)), isNull(teacherAdminSessions.revokedAt), gt(teacherAdminSessions.expiresAt, new Date()))).limit(1);
+  if (rows[0]) await db.update(teacherAdminSessions).set({ lastSeenAt: new Date() }).where(eq(teacherAdminSessions.id, rows[0].session.id));
+  return rows[0];
+}
+
+export async function revokeTeacherAdminSession(token: string) {
+  const db = await getDb();
+  if (!db) return;
+  await db.update(teacherAdminSessions).set({ revokedAt: new Date() }).where(eq(teacherAdminSessions.tokenHash, getTeacherAdminSessionTokenHash(token)));
 }
 
 export async function getProfile(userId: number) {
@@ -212,9 +248,9 @@ export async function listClassroomMembers(userId: number) {
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
   const fields = { id: studentProfiles.id, userId: studentProfiles.userId, classroomId: studentProfiles.classroomId, classroomName: classrooms.name, displayName: studentProfiles.displayName, classroomRole: studentProfiles.classroomRole, createdAt: studentProfiles.createdAt };
-  if (account[0]?.role === "admin") return db.select(fields).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id));
+  if (account[0]?.role === "admin") return db.select(fields).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(eq(studentProfiles.classroomRole, "student"));
   const manager = await requireClassroomManager(userId);
-  return db.select(fields).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(eq(studentProfiles.classroomId, manager.profile.classroomId));
+  return db.select(fields).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(and(eq(studentProfiles.classroomId, manager.profile.classroomId), eq(studentProfiles.classroomRole, "student")));
 }
 
 export async function requireGlobalAdmin(userId: number) {
@@ -298,6 +334,14 @@ export async function listManageableAnnouncements(userId: number) {
   const where = scope.isAdmin ? undefined : or(eq(announcements.classroomId, scope.profile!.profile.classroomId), eq(announcements.authorUserId, userId));
   const query = db.select().from(announcements).orderBy(desc(announcements.publishedAt));
   return where ? query.where(where) : query;
+}
+
+export async function listAnnouncementHistory(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const scope = await getAnnouncementManagementScope(userId);
+  const rows = await db.select({ log: activityLogs, actorName: users.name, classroomName: classrooms.name }).from(activityLogs).leftJoin(users, eq(activityLogs.actorUserId, users.id)).leftJoin(classrooms, eq(activityLogs.classroomId, classrooms.id)).orderBy(desc(activityLogs.createdAt)).limit(120);
+  return rows.filter(row => row.log.category === "classroom" && row.log.action.startsWith("announcement.") && (scope.isAdmin || row.log.classroomId === scope.profile?.profile.classroomId)).slice(0, 30).map(row => ({ id: row.log.id, action: row.log.action, details: row.log.details, createdAt: row.log.createdAt, actorName: row.actorName ?? "管理者", classroomName: row.classroomName ?? "全体" }));
 }
 
 async function requireAnnouncementEditor(userId: number, announcementId: number) {
@@ -507,10 +551,10 @@ export async function saveJournalEntry(userId: number, input: { subject: "englis
   return inserted[0];
 }
 
-export async function listJournalEntries(userId: number) {
+export async function listJournalEntries(userId: number, subject?: "english" | "kanji") {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select().from(journalEntries).where(eq(journalEntries.userId, userId)).orderBy(desc(journalEntries.createdAt)).limit(30);
+  const rows = await db.select().from(journalEntries).where(subject ? and(eq(journalEntries.userId, userId), eq(journalEntries.subject, subject)) : eq(journalEntries.userId, userId)).orderBy(desc(journalEntries.createdAt)).limit(30);
   return rows.map(row => {
     let questions: Array<{ question: string; answer: string; explanation: string }> = [];
     try { const parsed = JSON.parse(row.questionsJson); if (Array.isArray(parsed)) questions = parsed; } catch { /* 破損した履歴は設問なしとして安全に表示する */ }
@@ -567,14 +611,14 @@ export async function getManagementInsights(userId: number) {
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
   const profile = await getProfile(userId);
-  if (account[0]?.role !== "admin" && profile?.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
+  if (account[0]?.role !== "admin" && profile?.profile.classroomRole !== "owner" && profile?.profile.classroomRole !== "teacher") throw new Error("GLOBAL_MANAGER_REQUIRED");
   const classroomFilter = account[0]?.role === "admin" ? undefined : profile?.profile.classroomId;
   const [members, sessions, records, journals, logs] = await Promise.all([
     db.select().from(studentProfiles), db.select().from(focusSessions), db.select().from(studyRecords), db.select().from(journalEntries), db.select({ log: activityLogs, actorName: users.name, classroomName: classrooms.name }).from(activityLogs).leftJoin(users, eq(activityLogs.actorUserId, users.id)).leftJoin(classrooms, eq(activityLogs.classroomId, classrooms.id)).orderBy(desc(activityLogs.createdAt)).limit(40),
   ]);
   const include = (classroomId: number) => classroomFilter === undefined || classroomId === classroomFilter;
-  const scopedMembers = members.filter(member => include(member.classroomId)); const scopedSessions = sessions.filter(session => include(session.classroomId)); const scopedRecords = records.filter(record => include(record.classroomId)); const scopedJournals = journals.filter(entry => include(entry.classroomId));
+  const scopedMembers = members.filter(member => member.classroomRole === "student" && include(member.classroomId)); const scopedSessions = sessions.filter(session => include(session.classroomId)); const scopedRecords = records.filter(record => include(record.classroomId)); const scopedJournals = journals.filter(entry => include(entry.classroomId));
   const totalFocusSeconds = scopedSessions.reduce((sum, session) => sum + session.focusSeconds, 0);
   const correct = scopedRecords.filter(record => record.isCorrect).length;
-  return { memberCount: scopedMembers.length, totalFocusSeconds, answers: scopedRecords.length, retention: scopedRecords.length ? Math.round((correct / scopedRecords.length) * 100) : 0, journalCount: scopedJournals.length, recentActivities: logs.filter(row => row.log.classroomId === null || include(row.log.classroomId)).map(row => ({ id: row.log.id, category: row.log.category, action: row.log.action, details: row.log.details, createdAt: row.log.createdAt, actorName: row.actorName ?? "管理者", classroomName: row.classroomName ?? "全体" })) };
+  return { memberCount: scopedMembers.length, totalFocusSeconds, answers: scopedRecords.length, retention: scopedRecords.length ? Math.round((correct / scopedRecords.length) * 100) : 0, journalCount: scopedJournals.length, recentActivities: logs.filter(row => classroomFilter === undefined ? true : row.log.classroomId !== null && include(row.log.classroomId)).map(row => ({ id: row.log.id, category: row.log.category, action: row.log.action, details: row.log.details, createdAt: row.log.createdAt, actorName: row.actorName ?? "管理者", classroomName: row.classroomName ?? "全体" })) };
 }

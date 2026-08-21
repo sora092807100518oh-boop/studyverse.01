@@ -1,6 +1,6 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
-import { getPinSession, getSiteAdminSession, getUserById } from "../db";
+import { getPinSession, getSiteAdminSession, getTeacherAdminSession, getUserById } from "../db";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -17,6 +17,12 @@ export async function createContext(
   const adminToken = getCookie("studyverse_admin");
   if (adminToken) {
     try { user = (await getSiteAdminSession(adminToken))?.user ?? null; } catch (error) { console.warn("[Site Admin Auth] Session lookup failed", String(error)); }
+  }
+  if (!user) {
+    const teacherToken = getCookie("studyverse_teacher");
+    if (teacherToken) {
+      try { user = (await getTeacherAdminSession(teacherToken))?.user ?? null; } catch (error) { console.warn("[Teacher Admin Auth] Session lookup failed", String(error)); }
+    }
   }
   if (!user) {
     const pinToken = getCookie("studyverse_pin");
