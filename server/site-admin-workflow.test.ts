@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authenticateWithPin, createClassroom, createPinAccount, getDb, getManagementInsights, getOrCreateSiteAdmin, recordLearningResult, resetPinForProfile } from "./db";
+import { authenticateWithPin, createClassroom, createPinAccount, getDb, getManagementInsights, getOrCreateSiteAdmin, recordLearningResult, resetPinForProfile, saveJournalEntry } from "./db";
 import { activityLogs, classrooms, focusSessions, journalEntries, pinSessions, studentProfiles, studyRecords, users } from "../drizzle/schema";
 import { inArray } from "drizzle-orm";
 import { afterAll } from "vitest";
@@ -76,6 +76,14 @@ describe("独立全体管理者の教室初期設定フロー", () => {
     expect(first.profile.classroomRole).toBe("student");
     expect(first.profile.userId).toBe(second.profile.userId);
     expect(first.profile.displayName).toMatch(/^学習者 \d+$/);
+  }, 15_000);
+
+  it("教室プロフィールを持たない全体管理者も最新の教室へJournalを保存できる", async () => {
+    const admin = await getOrCreateSiteAdmin(); const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+    const room = await createClassroom(admin.id, { code: `JOURNAL-${suffix}`.slice(0, 32), name: `Journal保存検証 ${suffix}` });
+    createdRoomIds.add(room.id);
+    const saved = await saveJournalEntry(admin.id, { subject: "english", difficulty: "basic", sourceType: "news", articleTitle: "Fallback save", articleBody: "A neutral reading passage for verifying that a site administrator can save a journal entry even without a classroom profile.", questions: [{ question: "Q1", answer: "A1", explanation: "E1" }, { question: "Q2", answer: "A2", explanation: "E2" }, { question: "Q3", answer: "A3", explanation: "E3" }] });
+    expect(saved.id).toBeGreaterThan(0);
   }, 15_000);
 
   it("カード練習・テストの正誤履歴を保存し、管理記録から確認できる", async () => {

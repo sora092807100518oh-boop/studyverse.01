@@ -2,6 +2,7 @@ import { z } from "zod";
 import { invokeLLM } from "./_core/llm";
 
 const GDELT_ARTICLE_ENDPOINT = "https://api.gdeltproject.org/api/v2/doc/doc";
+const HACKER_NEWS_SEARCH_ENDPOINT = "https://hn.algolia.com/api/v1/search_by_date";
 
 const articleSchema = z.object({
   title: z.string().min(1).max(240),
@@ -12,19 +13,49 @@ const articleSchema = z.object({
 export type JournalArticle = z.infer<typeof articleSchema>;
 export type NewsSource = { title: string; url: string; domain: string };
 
-export async function fetchTodayNewsSource(): Promise<NewsSource> {
+function toNewsSource(item: { title?: string; url?: string; domain?: string }): NewsSource | undefined {
+  if (typeof item.title !== "string" || typeof item.url !== "string" || !/^https:\/\//.test(item.url)) return undefined;
+  return { title: item.title.slice(0, 500), url: item.url, domain: item.domain ?? new URL(item.url).hostname };
+}
+
+async function fetchGdeltNewsSource(): Promise<NewsSource> {
   const url = new URL(GDELT_ARTICLE_ENDPOINT);
   url.searchParams.set("query", "(science OR education OR environment OR technology)");
   url.searchParams.set("mode", "artlist");
   url.searchParams.set("format", "json");
   url.searchParams.set("maxrecords", "10");
   url.searchParams.set("timespan", "1d");
-  const response = await fetch(url, { signal: AbortSignal.timeout(8_000), headers: { accept: "application/json" } });
+  const response = await fetch(url, { signal: AbortSignal.timeout(6_000), headers: { accept: "application/json" } });
   if (!response.ok) throw new Error("NEWS_SOURCE_UNAVAILABLE");
   const payload = await response.json() as { articles?: Array<{ title?: string; url?: string; domain?: string }> };
-  const article = payload.articles?.find(item => typeof item.title === "string" && typeof item.url === "string" && /^https:\/\//.test(item.url));
-  if (!article?.title || !article.url) throw new Error("NEWS_SOURCE_UNAVAILABLE");
-  return { title: article.title.slice(0, 500), url: article.url, domain: article.domain ?? new URL(article.url).hostname };
+  const source = payload.articles?.map(toNewsSource).find((item): item is NewsSource => Boolean(item));
+  if (!source) throw new Error("NEWS_SOURCE_UNAVAILABLE");
+  return source;
+}
+
+async function fetchHackerNewsSource(): Promise<NewsSource> {
+  const url = new URL(HACKER_NEWS_SEARCH_ENDPOINT);
+  url.searchParams.set("query", "education technology science");
+  url.searchParams.set("tags", "story");
+  url.searchParams.set("hitsPerPage", "10");
+  const response = await fetch(url, { signal: AbortSignal.timeout(6_000), headers: { accept: "application/json" } });
+  if (!response.ok) throw new Error("NEWS_SOURCE_UNAVAILABLE");
+  const payload = await response.json() as { hits?: Array<{ title?: string; story_title?: string; url?: string; story_url?: string }> };
+  const source = payload.hits?.map(item => toNewsSource({ title: item.title ?? item.story_title, url: item.url ?? item.story_url })).find((item): item is NewsSource => Boolean(item));
+  if (!source) throw new Error("NEWS_SOURCE_UNAVAILABLE");
+  return source;
+}
+
+export async function fetchTodayNewsSource(): Promise<NewsSource> {
+  try {
+    return await fetchGdeltNewsSource();
+  } catch {
+    try {
+      return await fetchHackerNewsSource();
+    } catch {
+      throw new Error("NEWS_SOURCE_UNAVAILABLE");
+    }
+  }
 }
 
 export async function generateJournalArticle(input: { subject: "english" | "kanji"; difficulty: string; source?: NewsSource }): Promise<JournalArticle> {

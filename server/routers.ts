@@ -176,10 +176,10 @@ export const appRouter = router({
       manage: protectedProcedure.query(async ({ ctx }) => {
         try { return await listManageableAnnouncements(ctx.user.id); } catch (error) { return toUserMessage(error); }
       }),
-      create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), body: z.string().trim().min(1).max(5000), visibility: z.enum(["classroom", "global"]).default("classroom"), classroomId: z.number().int().positive().optional(), expiresAt: z.date().optional() })).mutation(async ({ ctx, input }) => {
+      create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), body: z.string().trim().min(1).max(5000), visibility: z.enum(["classroom", "global"]).default("classroom"), classroomId: z.number().int().positive().optional(), scheduledAt: z.date().optional(), expiresAt: z.date().optional() })).mutation(async ({ ctx, input }) => {
         try { return await createAnnouncement(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
       }),
-      update: protectedProcedure.input(z.object({ announcementId: z.number().int().positive(), title: z.string().trim().min(1).max(160).optional(), body: z.string().trim().min(1).max(5000).optional(), visibility: z.enum(["classroom", "global"]).optional(), classroomId: z.number().int().positive().optional(), expiresAt: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      update: protectedProcedure.input(z.object({ announcementId: z.number().int().positive(), title: z.string().trim().min(1).max(160).optional(), body: z.string().trim().min(1).max(5000).optional(), visibility: z.enum(["classroom", "global"]).optional(), classroomId: z.number().int().positive().optional(), scheduledAt: z.date().nullable().optional(), expiresAt: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
         const { announcementId, ...update } = input;
         try { await updateAnnouncement(ctx.user.id, announcementId, update); return { success: true }; } catch (error) { return toUserMessage(error); }
       }),

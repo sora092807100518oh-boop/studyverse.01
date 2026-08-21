@@ -15,6 +15,12 @@ describe("previewVocabularyRows", () => {
     expect(row).toMatchObject({ valid: false, reason: "表面と裏面の両方が必要です。" });
   });
 
+  it("単語・意味のヘッダー行を自動で除外する", () => {
+    expect(previewVocabularyRows("単語,意味\nobserve,観察する")).toEqual([
+      { line: 2, front: "observe", back: "観察する", valid: true },
+    ]);
+  });
+
   it("最大件数を超えるCSVを拒否する", () => {
     expect(() => previewVocabularyRows("a,b\nc,d\ne,f", 2)).toThrow("CSV_LIMIT_EXCEEDED");
   });

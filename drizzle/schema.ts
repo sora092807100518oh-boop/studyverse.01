@@ -126,6 +126,7 @@ export const announcements = mysqlTable("announcements", {
   title: varchar("title", { length: 160 }).notNull(),
   body: text("body").notNull(),
   publishedAt: timestamp("publishedAt").defaultNow().notNull(),
+  scheduledAt: timestamp("scheduledAt"),
   expiresAt: timestamp("expiresAt"),
 });
 

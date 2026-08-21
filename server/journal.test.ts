@@ -25,4 +25,15 @@ describe("StudyJournalのニュース取得", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ articles: [{ title: "unsafe", url: "http://example.org" }] }), { status: 200 })));
     await expect(fetchTodayNewsSource()).rejects.toThrow("NEWS_SOURCE_UNAVAILABLE");
   });
+
+  it("GDELTが利用できないときはHacker News検索結果へフォールバックする", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ hits: [{ title: "A useful learning technology story", url: "https://example.org/hn-story" }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchTodayNewsSource()).resolves.toEqual({ title: "A useful learning technology story", url: "https://example.org/hn-story", domain: "example.org" });
+    expect(fetchMock.mock.calls).toHaveLength(2);
+    expect(fetchMock.mock.calls[1]?.[0].toString()).toContain("hn.algolia.com");
+  });
 });

@@ -54,6 +54,16 @@ describe("お知らせ管理UI", () => {
     expect(hooks.toastSuccess).toHaveBeenCalledWith("お知らせを配信しました。");
   });
 
+  it("予約日時を設定すると、予約保存としてAPIへ日時を送信する", async () => {
+    hooks.createAnnouncement.mockResolvedValue({ id: 2 });
+    render(<ClassroomContentManager section="announcements" />);
+    fillAnnouncement();
+    fireEvent.change(screen.getByLabelText("予約日時"), { target: { value: "2026-08-22T09:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "予約して保存" }));
+    await waitFor(() => expect(hooks.createAnnouncement).toHaveBeenCalledWith({ title: "今週のミッション", body: "単語カードを10問練習しましょう。", visibility: "classroom", classroomId: 5, scheduledAt: new Date("2026-08-22T09:00") }));
+    expect(hooks.toastSuccess).toHaveBeenCalledWith("お知らせを予約しました。");
+  });
+
   it("お知らせ保存が失敗したときはエラーを表示し、再試行できる", async () => {
     hooks.createAnnouncement.mockRejectedValue(new Error("配信サーバーに接続できません"));
     render(<ClassroomContentManager section="announcements" />);

@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, isNull, or } from "drizzle-orm";
+import { and, desc, eq, gt, gte, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, siteAdminSessions, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
@@ -261,7 +261,8 @@ export async function listVisibleAnnouncements(userId: number) {
   if (!db) return [];
   const profile = await getProfile(userId);
   const visible = profile ? or(eq(announcements.visibility, "global"), and(eq(announcements.visibility, "classroom"), eq(announcements.classroomId, profile.profile.classroomId))) : eq(announcements.visibility, "global");
-  return db.select().from(announcements).where(visible).orderBy(desc(announcements.publishedAt));
+  const availableNow = or(isNull(announcements.scheduledAt), lte(announcements.scheduledAt, new Date()));
+  return db.select().from(announcements).where(and(visible, availableNow)).orderBy(desc(announcements.publishedAt));
 }
 
 async function getAnnouncementManagementScope(userId: number) {
@@ -275,14 +276,17 @@ async function getAnnouncementManagementScope(userId: number) {
   return { isAdmin, profile };
 }
 
-function resolveAnnouncementClassroomId(scope: Awaited<ReturnType<typeof getAnnouncementManagementScope>>, visibility: "classroom" | "global", requestedClassroomId?: number) {
+async function resolveAnnouncementClassroomId(scope: Awaited<ReturnType<typeof getAnnouncementManagementScope>>, visibility: "classroom" | "global", requestedClassroomId?: number) {
   if (visibility === "global") {
     if (!scope.isAdmin && scope.profile?.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
     return null;
   }
   if (scope.isAdmin) {
-    if (!requestedClassroomId) throw new Error("CLASSROOM_REQUIRED");
-    return requestedClassroomId;
+    if (requestedClassroomId) return requestedClassroomId;
+    const db = await getDb();
+    const latestClassroom = db ? (await db.select({ id: classrooms.id }).from(classrooms).orderBy(desc(classrooms.createdAt)).limit(1))[0] : undefined;
+    if (!latestClassroom) throw new Error("CLASSROOM_REQUIRED");
+    return latestClassroom.id;
   }
   return scope.profile?.profile.classroomId;
 }
@@ -306,21 +310,21 @@ async function requireAnnouncementEditor(userId: number, announcementId: number)
   return { db, announcement: row[0], scope };
 }
 
-export async function createAnnouncement(userId: number, input: { title: string; body: string; visibility: "classroom" | "global"; expiresAt?: Date; classroomId?: number }) {
+export async function createAnnouncement(userId: number, input: { title: string; body: string; visibility: "classroom" | "global"; expiresAt?: Date; scheduledAt?: Date; classroomId?: number }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const scope = await getAnnouncementManagementScope(userId);
-  const classroomId = resolveAnnouncementClassroomId(scope, input.visibility, input.classroomId);
-  const result = await db.insert(announcements).values({ classroomId, authorUserId: userId, title: input.title, body: input.body, visibility: input.visibility, expiresAt: input.expiresAt ?? null }).$returningId();
+  const classroomId = await resolveAnnouncementClassroomId(scope, input.visibility, input.classroomId);
+  const result = await db.insert(announcements).values({ classroomId, authorUserId: userId, title: input.title, body: input.body, visibility: input.visibility, scheduledAt: input.scheduledAt ?? null, expiresAt: input.expiresAt ?? null }).$returningId();
   await writeActivity({ actorUserId: userId, classroomId: classroomId ?? undefined, category: "classroom", action: "announcement.created", details: input.title });
   return result[0];
 }
 
-export async function updateAnnouncement(userId: number, announcementId: number, input: { title?: string; body?: string; visibility?: "classroom" | "global"; expiresAt?: Date | null; classroomId?: number }) {
+export async function updateAnnouncement(userId: number, announcementId: number, input: { title?: string; body?: string; visibility?: "classroom" | "global"; expiresAt?: Date | null; scheduledAt?: Date | null; classroomId?: number }) {
   const { db, announcement, scope } = await requireAnnouncementEditor(userId, announcementId);
   const visibility = input.visibility ?? announcement.visibility;
-  const classroomId = input.visibility || input.classroomId !== undefined ? resolveAnnouncementClassroomId(scope, visibility, input.classroomId) : announcement.classroomId;
-  await db.update(announcements).set({ title: input.title, body: input.body, visibility, classroomId, expiresAt: input.expiresAt }).where(eq(announcements.id, announcementId));
+  const classroomId = input.visibility || input.classroomId !== undefined ? await resolveAnnouncementClassroomId(scope, visibility, input.classroomId) : announcement.classroomId;
+  await db.update(announcements).set({ title: input.title, body: input.body, visibility, classroomId, scheduledAt: input.scheduledAt, expiresAt: input.expiresAt }).where(eq(announcements.id, announcementId));
   await writeActivity({ actorUserId: userId, classroomId: classroomId ?? undefined, category: "classroom", action: "announcement.updated", details: input.title ?? announcement.title });
 }
 
@@ -494,9 +498,12 @@ export async function saveJournalEntry(userId: number, input: { subject: "englis
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const profile = await getProfile(userId);
-  if (!profile) throw new Error("CLASSROOM_REQUIRED");
-  const inserted = await db.insert(journalEntries).values({ userId, classroomId: profile.profile.classroomId, subject: input.subject, difficulty: input.difficulty, sourceType: input.sourceType, sourceTitle: input.sourceTitle ?? null, sourceUrl: input.sourceUrl ?? null, articleTitle: input.articleTitle, articleBody: input.articleBody, questionsJson: JSON.stringify(input.questions) }).$returningId();
-  await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "journal", action: "journal.generated", details: input.articleTitle });
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const fallbackClassroom = !profile && account[0]?.role === "admin" ? (await db.select({ id: classrooms.id }).from(classrooms).orderBy(desc(classrooms.createdAt)).limit(1))[0] : undefined;
+  const classroomId = profile?.profile.classroomId ?? fallbackClassroom?.id;
+  if (!classroomId) throw new Error("CLASSROOM_REQUIRED");
+  const inserted = await db.insert(journalEntries).values({ userId, classroomId, subject: input.subject, difficulty: input.difficulty, sourceType: input.sourceType, sourceTitle: input.sourceTitle ?? null, sourceUrl: input.sourceUrl ?? null, articleTitle: input.articleTitle, articleBody: input.articleBody, questionsJson: JSON.stringify(input.questions) }).$returningId();
+  await writeActivity({ actorUserId: userId, classroomId, category: "journal", action: "journal.generated", details: input.articleTitle });
   return inserted[0];
 }
 

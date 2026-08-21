@@ -22,7 +22,7 @@ vi.mock("@/lib/trpc", () => ({
 vi.mock("sonner", () => ({ toast: { error: hooks.toastError, success: hooks.toastSuccess } }));
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { CsvWordImporter } from "./CsvWordImporter";
+import { buildVocabularyCsvTemplate, CsvWordImporter } from "./CsvWordImporter";
 
 const invalidPreview = { rows: [{ line: 1, front: "observe", back: "観察する", valid: true, duplicate: false }, { line: 2, front: "", back: "欠損", valid: false, duplicate: false, reason: "表面と裏面の両方が必要です。" }], validCount: 1, duplicateCount: 0, invalidCount: 1 };
 const duplicatePreview = { rows: [{ line: 1, front: "observe", back: "観察する", valid: true, duplicate: false }, { line: 2, front: "observe", back: "観察する", valid: true, duplicate: true }], validCount: 1, duplicateCount: 1, invalidCount: 0 };
@@ -30,6 +30,10 @@ const duplicatePreview = { rows: [{ line: 1, front: "observe", back: "観察す�
 afterEach(() => { cleanup(); hooks.previewData = null; hooks.previewMutate.mockReset(); hooks.importMutate.mockReset(); hooks.reset.mockReset(); hooks.toastError.mockReset(); hooks.toastSuccess.mockReset(); });
 
 describe("CSV単語帳取込UI", () => {
+  it("テンプレートは単語・意味のヘッダーを含む", () => {
+    expect(buildVocabularyCsvTemplate()).toBe("単語,意味\n");
+  });
+
   it("不正行をプレビューで表示し、取込ボタンを無効化する", async () => {
     hooks.previewMutate.mockResolvedValue(invalidPreview);
     const { rerender } = render(<CsvWordImporter wordbookId={12} onComplete={vi.fn()} />);
