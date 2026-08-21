@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
-import { activityLogs, announcements, classrooms, focusSessions, journalEntries, pinSessions, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
-import { createAnnouncement, createClassroom, createPinAccount, createWordbook, deleteAnnouncement, deleteWordbook, getDb, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableWordbooks, listVisibleAnnouncements, previewWordbookCsv, recordFocusSession, recordLearningResult, updateAnnouncement, updateWordbook } from "./db";
+import { activityLogs, announcements, classrooms, focusSessions, journalEntries, pinSessions, recommendedTests, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { createAnnouncement, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, previewWordbookCsv, recordFocusSession, recordLearningResult, updateAnnouncement, updateWordbook } from "./db";
 
 const createdClassroomIds = new Set<number>();
 const createdUserIds = new Set<number>();
@@ -13,6 +13,7 @@ afterAll(async () => {
   if (classroomIds.length) {
     const books = await db.select({ id: wordbooks.id }).from(wordbooks).where(inArray(wordbooks.classroomId, classroomIds));
     const bookIds = books.map(book => book.id);
+    await db.delete(recommendedTests).where(inArray(recommendedTests.classroomId, classroomIds));
     if (bookIds.length) await db.delete(vocabularyWords).where(inArray(vocabularyWords.wordbookId, bookIds));
     if (bookIds.length) await db.delete(wordbooks).where(inArray(wordbooks.id, bookIds));
     await db.delete(activityLogs).where(inArray(activityLogs.classroomId, classroomIds));
@@ -78,4 +79,23 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     expect((await listManageableAnnouncements(admin.id)).find(item => item.id === announcement.id)).toBeUndefined();
     expect((await listAnnouncementHistory(admin.id)).some(item => item.action === "announcement.deleted" && item.details === "更新済みお知らせ")).toBe(true);
   }, 15_000);
+
+  it("単語帳の範囲をおすすめテストとして配信し、同じ教室の学習者だけが受け取る", async () => {
+    const admin = await getOrCreateSiteAdmin(); const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+    const room = await createClassroom(admin.id, { code: `ASSIGN-${suffix}`.slice(0, 32), name: `出題配信教室 ${suffix}` }); createdClassroomIds.add(room.id);
+    const otherRoom = await createClassroom(admin.id, { code: `OTHER-${suffix}`.slice(0, 32), name: `別教室 ${suffix}` }); createdClassroomIds.add(otherRoom.id);
+    const learner = await createPinAccount(admin.id, { classroomId: room.id, displayName: "配信対象学習者", pin: "1357" }); createdUserIds.add(learner.userId);
+    const otherLearner = await createPinAccount(admin.id, { classroomId: otherRoom.id, displayName: "配信対象外学習者", pin: "2468" }); createdUserIds.add(otherLearner.userId);
+    const book = await createWordbook(admin.id, { title: "範囲指定教材", subject: "english", visibility: "classroom", classroomId: room.id });
+    await importWordbookCsv(admin.id, { wordbookId: book.id, csvText: "alpha,最初\nbeta,次\ngamma,三番目" });
+    const exported = await exportWordbookCsv(admin.id, book.id); expect(exported.words).toHaveLength(3); expect(exported.words[0].front).toBe("alpha");
+    await expect(createRecommendedTest(admin.id, { wordbookId: book.id, rangeStart: 1, rangeEnd: 4, questionCount: 2, classroomId: room.id })).rejects.toThrow("TEST_RANGE_INVALID");
+    const assignment = await createRecommendedTest(admin.id, { wordbookId: book.id, rangeStart: 2, rangeEnd: 3, questionCount: 2, classroomId: room.id });
+    const learnerAssignments = await listRecommendedTestsForLearner(learner.userId); expect(learnerAssignments.find(item => item.id === assignment.id)).toMatchObject({ wordbookTitle: "範囲指定教材", rangeStart: 2, rangeEnd: 3, questionCount: 2 }); expect(learnerAssignments.find(item => item.id === assignment.id)?.words.map(word => word.front)).toEqual(["beta", "gamma"]);
+    expect((await listRecommendedTestsForLearner(otherLearner.userId)).some(item => item.id === assignment.id)).toBe(false); expect((await listManageableRecommendedTests(admin.id)).some(item => item.id === assignment.id)).toBe(true);
+    const db = await getDb(); const words = await db!.select().from(vocabularyWords).where(eq(vocabularyWords.wordbookId, book.id)).orderBy(vocabularyWords.id);
+    await recordLearningResult(learner.userId, { wordId: words[0].id, mode: "practice", isCorrect: false }); expect((await listReviewWords(learner.userId)).map(word => word.id)).toContain(words[0].id);
+    await recordLearningResult(learner.userId, { wordId: words[0].id, mode: "practice", isCorrect: true }); expect((await listReviewWords(learner.userId)).map(word => word.id)).not.toContain(words[0].id);
+    await deleteRecommendedTest(admin.id, assignment.id); expect((await listManageableRecommendedTests(admin.id)).some(item => item.id === assignment.id)).toBe(false);
+  }, 20_000);
 });

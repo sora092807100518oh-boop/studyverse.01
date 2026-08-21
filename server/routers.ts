@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteVocabularyWord, deleteWordbook, getLearningSummary, getLearningTrend, getManagementInsights, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableWordbooks, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveJournalEntry, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook } from "./db";
+import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, exportWordbookCsv, getLearningSummary, getLearningTrend, getManagementInsights, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveJournalEntry, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook } from "./db";
 import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -122,6 +122,9 @@ export const appRouter = router({
     recordAnswer: protectedProcedure.input(z.object({ wordId: z.number().int().positive().optional(), mode: z.enum(["practice", "test", "journal", "ai_select"]), isCorrect: z.boolean() })).mutation(async ({ ctx, input }) => {
       try { await recordLearningResult(ctx.user.id, input); return { success: true }; } catch (error) { return toUserMessage(error); }
     }),
+    review: protectedProcedure.query(async ({ ctx }) => {
+      try { return await listReviewWords(ctx.user.id); } catch (error) { return toUserMessage(error); }
+    }),
     trend: protectedProcedure.input(z.object({ period: z.enum(["day", "week", "month"]) })).query(async ({ ctx, input }) => {
       try { return await getLearningTrend(ctx.user.id, input.period); } catch (error) { return toUserMessage(error); }
     }),
@@ -162,6 +165,9 @@ export const appRouter = router({
     }),
     importCsv: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), csvText: z.string().min(1).max(2_000_000) })).mutation(async ({ ctx, input }) => {
       try { return await importWordbookCsv(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
+    }),
+    exportCsv: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      try { return await exportWordbookCsv(ctx.user.id, input.wordbookId); } catch (error) { return toUserMessage(error); }
     }),
     managed: protectedProcedure.query(async ({ ctx }) => {
       try { return await listManageableWordbooks(ctx.user.id); } catch (error) { return toUserMessage(error); }
@@ -222,6 +228,20 @@ export const appRouter = router({
       create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), startsAt: z.date(), endsAt: z.date().optional(), visibility: z.enum(["classroom", "global"]).default("classroom") })).mutation(async ({ ctx, input }) => {
         if (input.endsAt && input.endsAt < input.startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "終了時刻は開始時刻より後にしてください。" });
         try { return await createCalendarEvent(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
+      }),
+    }),
+    recommendedTests: router({
+      list: protectedProcedure.query(async ({ ctx }) => {
+        try { return await listRecommendedTestsForLearner(ctx.user.id); } catch (error) { return toUserMessage(error); }
+      }),
+      manage: protectedProcedure.query(async ({ ctx }) => {
+        try { return await listManageableRecommendedTests(ctx.user.id); } catch (error) { return toUserMessage(error); }
+      }),
+      create: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), rangeStart: z.number().int().positive(), rangeEnd: z.number().int().positive(), questionCount: z.number().int().positive(), classroomId: z.number().int().positive().optional(), availableFrom: z.date().optional(), availableUntil: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
+        try { return await createRecommendedTest(ctx.user.id, { ...input, availableUntil: input.availableUntil ?? undefined }); } catch (error) { return toUserMessage(error); }
+      }),
+      delete: protectedProcedure.input(z.object({ recommendedTestId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        try { await deleteRecommendedTest(ctx.user.id, input.recommendedTestId); return { success: true }; } catch (error) { return toUserMessage(error); }
       }),
     }),
   }),

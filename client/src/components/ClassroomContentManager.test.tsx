@@ -6,6 +6,7 @@ const hooks = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   invalidate: vi.fn().mockResolvedValue(undefined),
+  managedBooks: [] as Array<{ id: number; title: string; subject: "english" | "kanji"; visibility: "private" | "classroom"; classroomId: number | null; wordCount: number; words: Array<{ front: string; back: string; reading: string | null }> }>,
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -22,10 +23,11 @@ vi.mock("@/lib/trpc", () => ({
       },
     },
     wordbooks: {
-      managed: { useQuery: () => ({ data: [], isLoading: false, isError: false }) },
+      managed: { useQuery: () => ({ data: hooks.managedBooks, isLoading: false, isError: false }) },
       create: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
       update: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
       delete: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
+      exportCsv: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
     },
   },
 }));
@@ -35,7 +37,7 @@ vi.mock("sonner", () => ({ toast: { error: hooks.toastError, success: hooks.toas
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ClassroomContentManager } from "./ClassroomContentManager";
 
-afterEach(() => { cleanup(); hooks.createAnnouncement.mockReset(); hooks.toastError.mockReset(); hooks.toastSuccess.mockReset(); hooks.invalidate.mockClear(); });
+afterEach(() => { cleanup(); hooks.createAnnouncement.mockReset(); hooks.toastError.mockReset(); hooks.toastSuccess.mockReset(); hooks.invalidate.mockClear(); hooks.managedBooks = []; });
 
 function fillAnnouncement() {
   fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "今週のミッション" } });
@@ -73,5 +75,16 @@ describe("お知らせ管理UI", () => {
     await waitFor(() => expect(hooks.toastError).toHaveBeenCalledWith("配信サーバーに接続できません"));
     expect(screen.getByRole("alert").textContent).toContain("配信サーバーに接続できません");
     expect((screen.getByRole("button", { name: "配信して保存" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+});
+
+describe("管理単語帳CSV", () => {
+  it("読み込み済みの単語帳データからCSV保存を開始する", () => {
+    hooks.managedBooks = [{ id: 9, title: "英語第1章", subject: "english", visibility: "classroom", classroomId: 5, wordCount: 1, words: [{ front: "observe", back: "観察する", reading: null }] }];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    render(<ClassroomContentManager section="wordbooks" />);
+    fireEvent.click(screen.getByRole("button", { name: "CSV" }));
+    expect(click).toHaveBeenCalled(); expect(document.querySelector('a[href^="data:text/csv"]')?.getAttribute("download")).toBe("英語第1章.csv"); expect(hooks.toastSuccess).toHaveBeenCalledWith("単語帳CSVをダウンロードしました。");
+    click.mockRestore();
   });
 });

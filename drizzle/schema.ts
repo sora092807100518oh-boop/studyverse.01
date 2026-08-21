@@ -153,6 +153,19 @@ export const calendarEvents = mysqlTable("calendarEvents", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const recommendedTests = mysqlTable("recommendedTests", {
+  id: int("id").autoincrement().primaryKey(),
+  classroomId: int("classroomId").notNull(),
+  authorUserId: int("authorUserId").notNull(),
+  wordbookId: int("wordbookId").notNull(),
+  rangeStart: int("rangeStart").notNull(),
+  rangeEnd: int("rangeEnd").notNull(),
+  questionCount: int("questionCount").notNull(),
+  availableFrom: timestamp("availableFrom").defaultNow().notNull(),
+  availableUntil: timestamp("availableUntil"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const activityLogs = mysqlTable("activityLogs", {
   id: int("id").autoincrement().primaryKey(),
   actorUserId: int("actorUserId").notNull(),

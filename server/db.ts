@@ -1,7 +1,7 @@
-import { and, desc, eq, gt, gte, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, recommendedTests, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -395,6 +395,75 @@ export async function createCalendarEvent(userId: number, input: { title: string
   return result[0];
 }
 
+async function getRecommendedTestClassroomId(userId: number, requestedClassroomId?: number) {
+  const scope = await getAnnouncementManagementScope(userId);
+  if (!scope.isAdmin) return scope.profile!.profile.classroomId;
+  if (requestedClassroomId) return requestedClassroomId;
+  const db = await getDb();
+  const latest = db ? (await db.select({ id: classrooms.id }).from(classrooms).orderBy(desc(classrooms.createdAt)).limit(1))[0] : undefined;
+  if (!latest) throw new Error("CLASSROOM_REQUIRED");
+  return latest.id;
+}
+
+export async function createRecommendedTest(userId: number, input: { wordbookId: number; rangeStart: number; rangeEnd: number; questionCount: number; classroomId?: number; availableFrom?: Date; availableUntil?: Date }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const classroomId = await getRecommendedTestClassroomId(userId, input.classroomId);
+  const scope = await getAnnouncementManagementScope(userId);
+  const book = (await db.select().from(wordbooks).where(eq(wordbooks.id, input.wordbookId)).limit(1))[0];
+  if (!book) throw new Error("WORD_BOOK_NOT_FOUND");
+  if (!scope.isAdmin && book.classroomId !== classroomId && book.ownerUserId !== userId) throw new Error("WORD_BOOK_FORBIDDEN");
+  const words = await db.select({ id: vocabularyWords.id }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, book.id)).orderBy(vocabularyWords.id);
+  if (input.rangeStart < 1 || input.rangeEnd < input.rangeStart || input.rangeEnd > words.length) throw new Error("TEST_RANGE_INVALID");
+  const rangeLength = input.rangeEnd - input.rangeStart + 1;
+  if (input.questionCount < 1 || input.questionCount > rangeLength) throw new Error("TEST_QUESTION_COUNT_INVALID");
+  if (input.availableUntil && input.availableFrom && input.availableUntil < input.availableFrom) throw new Error("TEST_PERIOD_INVALID");
+  const result = await db.insert(recommendedTests).values({ classroomId, authorUserId: userId, wordbookId: book.id, rangeStart: input.rangeStart, rangeEnd: input.rangeEnd, questionCount: input.questionCount, availableFrom: input.availableFrom ?? new Date(Date.now() - 1_000), availableUntil: input.availableUntil ?? null }).$returningId();
+  await writeActivity({ actorUserId: userId, classroomId, category: "classroom", action: "recommendedTest.created", details: `${book.title}｜第${input.rangeStart}〜${input.rangeEnd}語` });
+  return result[0];
+}
+
+async function decorateRecommendedTests(rows: Array<typeof recommendedTests.$inferSelect>) {
+  const db = await getDb();
+  if (!db) return [];
+  return Promise.all(rows.map(async item => {
+    const book = (await db.select().from(wordbooks).where(eq(wordbooks.id, item.wordbookId)).limit(1))[0];
+    if (!book) return null;
+    const words = await db.select().from(vocabularyWords).where(eq(vocabularyWords.wordbookId, item.wordbookId)).orderBy(vocabularyWords.id);
+    return { ...item, wordbookTitle: book.title, subject: book.subject, words: words.slice(item.rangeStart - 1, item.rangeEnd) };
+  })).then(items => items.filter((item): item is NonNullable<typeof item> => Boolean(item)));
+}
+
+export async function listRecommendedTestsForLearner(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const profile = await getProfile(userId);
+  if (!profile) return [];
+  const now = new Date();
+  const rows = await db.select().from(recommendedTests).where(and(eq(recommendedTests.classroomId, profile.profile.classroomId), lte(recommendedTests.availableFrom, now), or(isNull(recommendedTests.availableUntil), gte(recommendedTests.availableUntil, now)))).orderBy(desc(recommendedTests.createdAt));
+  return decorateRecommendedTests(rows);
+}
+
+export async function listManageableRecommendedTests(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const scope = await getAnnouncementManagementScope(userId);
+  const query = db.select().from(recommendedTests).orderBy(desc(recommendedTests.createdAt));
+  const rows = scope.isAdmin ? await query : await query.where(eq(recommendedTests.classroomId, scope.profile!.profile.classroomId));
+  return decorateRecommendedTests(rows);
+}
+
+export async function deleteRecommendedTest(userId: number, recommendedTestId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const item = (await db.select().from(recommendedTests).where(eq(recommendedTests.id, recommendedTestId)).limit(1))[0];
+  if (!item) throw new Error("RECOMMENDED_TEST_NOT_FOUND");
+  const scope = await getAnnouncementManagementScope(userId);
+  if (!scope.isAdmin && item.classroomId !== scope.profile?.profile.classroomId) throw new Error("CLASSROOM_MANAGER_REQUIRED");
+  await db.delete(recommendedTests).where(eq(recommendedTests.id, recommendedTestId));
+  await writeActivity({ actorUserId: userId, classroomId: item.classroomId, category: "classroom", action: "recommendedTest.deleted", details: `配信 #${item.id}` });
+}
+
 export async function listVisibleWordbooks(userId: number, subject?: "english" | "kanji") {
   const db = await getDb();
   if (!db) return [];
@@ -493,6 +562,12 @@ export async function importWordbookCsv(userId: number, input: { wordbookId: num
   return { importedCount: accepted.length, skippedCount: preview.duplicateCount };
 }
 
+export async function exportWordbookCsv(userId: number, wordbookId: number) {
+  const { db, book } = await getWordbookEditor(userId, wordbookId);
+  const words = await db.select({ front: vocabularyWords.front, back: vocabularyWords.back, reading: vocabularyWords.reading }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, wordbookId)).orderBy(vocabularyWords.id);
+  return { title: book.title, words };
+}
+
 export async function listManageableWordbooks(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
@@ -503,7 +578,10 @@ export async function listManageableWordbooks(userId: number) {
   const where = account[0]?.role === "admin" ? undefined : or(eq(wordbooks.classroomId, profile!.profile.classroomId), eq(wordbooks.ownerUserId, userId));
   const query = db.select().from(wordbooks).orderBy(desc(wordbooks.updatedAt));
   const rows = where ? await query.where(where) : await query;
-  return Promise.all(rows.map(async book => ({ ...book, wordCount: (await db.select({ id: vocabularyWords.id }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, book.id))).length })));
+  return Promise.all(rows.map(async book => {
+    const words = await db.select({ front: vocabularyWords.front, back: vocabularyWords.back, reading: vocabularyWords.reading }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, book.id)).orderBy(vocabularyWords.id);
+    return { ...book, wordCount: words.length, words };
+  }));
 }
 
 export async function updateWordbook(userId: number, wordbookId: number, input: { title?: string; visibility?: "private" | "classroom" }) {
@@ -527,6 +605,18 @@ export async function recordLearningResult(userId: number, input: { wordId?: num
   if (!profile) throw new Error("CLASSROOM_REQUIRED");
   await db.insert(studyRecords).values({ userId, classroomId: profile.profile.classroomId, wordId: input.wordId ?? null, mode: input.mode, isCorrect: input.isCorrect });
   await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "learning", action: `answer.${input.mode}`, details: input.isCorrect ? "correct" : "review" });
+}
+
+export async function listReviewWords(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const records = await db.select({ id: studyRecords.id, wordId: studyRecords.wordId, isCorrect: studyRecords.isCorrect, answeredAt: studyRecords.answeredAt }).from(studyRecords).where(and(eq(studyRecords.userId, userId), isNotNull(studyRecords.wordId))).orderBy(desc(studyRecords.answeredAt), desc(studyRecords.id)).limit(300);
+  const latestByWord = new Map<number, { isCorrect: boolean; answeredAt: Date }>();
+  for (const record of records) if (record.wordId !== null && !latestByWord.has(record.wordId)) latestByWord.set(record.wordId, { isCorrect: record.isCorrect, answeredAt: record.answeredAt });
+  const reviewIds = Array.from(latestByWord.entries()).filter(([, latest]) => !latest.isCorrect).map(([wordId]) => wordId);
+  if (!reviewIds.length) return [];
+  const words = await db.select().from(vocabularyWords).where(inArray(vocabularyWords.id, reviewIds));
+  return words.map(word => ({ ...word, missedAt: latestByWord.get(word.id)?.answeredAt ?? new Date(0) }));
 }
 
 export async function recordFocusSession(userId: number, input: { startedAt: Date; completedAt: Date; focusSeconds: number }) {
