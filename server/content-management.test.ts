@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, pinSessions, recommendedTests, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
-import { createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, previewWordbookCsv, recordFocusSession, recordLearningResult, updateAnnouncement, updateWordbook } from "./db";
+import { createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningDashboard, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, saveStudySet, updateAnnouncement, updateWordbook } from "./db";
 
 const createdClassroomIds = new Set<number>();
 const createdUserIds = new Set<number>();
@@ -98,6 +98,14 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     const db = await getDb(); const words = await db!.select().from(vocabularyWords).where(eq(vocabularyWords.wordbookId, book.id)).orderBy(vocabularyWords.id);
     await recordLearningResult(learner.userId, { wordId: words[0].id, mode: "practice", isCorrect: false }); expect((await listReviewWords(learner.userId)).map(word => word.id)).toContain(words[0].id);
     await recordLearningResult(learner.userId, { wordId: words[0].id, mode: "practice", isCorrect: true }); expect((await listReviewWords(learner.userId)).map(word => word.id)).not.toContain(words[0].id);
+    await recordLearningResult(learner.userId, { wordId: words[1].id, mode: "test", isCorrect: false });
+    await saveStudySet(learner.userId, { wordbookId: book.id, rangeStart: 3, rangeEnd: 3, label: "未学習の第3語" });
+    const learnerBook = (await listVisibleWordbooks(learner.userId)).find(item => item.id === book.id);
+    expect(learnerBook?.canEdit).toBe(false);
+    const dashboard = await getLearningDashboard(learner.userId);
+    expect(dashboard.wordbooks.find(item => item.id === book.id)).toMatchObject({ wordCount: 3, studiedWordCount: 2, masteredWordCount: 1, progressPercent: 33, accuracyPercent: 33 });
+    expect(dashboard.reviewWords.map(word => word.id)).toContain(words[1].id);
+    expect(dashboard.unstartedSets.map(set => set.label)).toContain("未学習の第3語");
     await deleteRecommendedTest(admin.id, assignment.id); expect((await listManageableRecommendedTests(admin.id)).some(item => item.id === assignment.id)).toBe(false);
   }, 20_000);
 

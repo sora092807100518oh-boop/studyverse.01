@@ -485,13 +485,17 @@ export async function listVisibleWordbooks(userId: number, subject?: "english" |
   const db = await getDb();
   if (!db) return [];
   const membership = await getProfile(userId);
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  const isAdmin = account[0]?.role === "admin";
   const visibility = membership
     ? or(eq(wordbooks.visibility, "global"), eq(wordbooks.ownerUserId, userId), and(eq(wordbooks.visibility, "classroom"), eq(wordbooks.classroomId, membership.profile.classroomId)))
     : or(eq(wordbooks.visibility, "global"), eq(wordbooks.ownerUserId, userId));
   const rows = await db.select().from(wordbooks).where(subject ? and(visibility, eq(wordbooks.subject, subject)) : visibility).orderBy(desc(wordbooks.updatedAt));
   return Promise.all(rows.map(async book => {
     const words = await db.select().from(vocabularyWords).where(eq(vocabularyWords.wordbookId, book.id));
-    return { ...book, wordCount: words.length, words };
+    const canManageClassroomMaterial = (membership?.profile.classroomRole === "teacher" || membership?.profile.classroomRole === "owner") && book.classroomId === membership.profile.classroomId;
+    const canEdit = isAdmin || (book.visibility === "private" ? book.ownerUserId === userId : canManageClassroomMaterial);
+    return { ...book, wordCount: words.length, words, canEdit };
   }));
 }
 
@@ -642,6 +646,40 @@ export async function listReviewWords(userId: number) {
   if (!reviewIds.length) return [];
   const words = await db.select().from(vocabularyWords).where(inArray(vocabularyWords.id, reviewIds));
   return words.map(word => ({ ...word, missedAt: latestByWord.get(word.id)?.answeredAt ?? new Date(0) }));
+}
+
+export async function getLearningDashboard(userId: number) {
+  const db = await getDb();
+  if (!db) return { wordbooks: [], reviewWords: [], unstartedSets: [] };
+  const [books, sets, records] = await Promise.all([
+    listVisibleWordbooks(userId),
+    listSavedStudySets(userId),
+    db.select({ id: studyRecords.id, wordId: studyRecords.wordId, isCorrect: studyRecords.isCorrect, answeredAt: studyRecords.answeredAt }).from(studyRecords).where(and(eq(studyRecords.userId, userId), isNotNull(studyRecords.wordId))).orderBy(desc(studyRecords.answeredAt), desc(studyRecords.id)).limit(1_000),
+  ]);
+  const latestByWord = new Map<number, { isCorrect: boolean; answeredAt: Date }>();
+  const attemptsByWord = new Map<number, Array<{ isCorrect: boolean }>>();
+  for (const record of records) {
+    if (record.wordId === null) continue;
+    if (!latestByWord.has(record.wordId)) latestByWord.set(record.wordId, { isCorrect: record.isCorrect, answeredAt: record.answeredAt });
+    const attempts = attemptsByWord.get(record.wordId) ?? [];
+    attempts.push({ isCorrect: record.isCorrect });
+    attemptsByWord.set(record.wordId, attempts);
+  }
+  const wordsById = new Map(books.flatMap(book => book.words.map(word => [word.id, { ...word, wordbookId: book.id, wordbookTitle: book.title }] as const)));
+  const wordbooks = books.map(book => {
+    const wordIds = book.words.map(word => word.id);
+    const studiedWordCount = wordIds.filter(wordId => latestByWord.has(wordId)).length;
+    const masteredWordCount = wordIds.filter(wordId => latestByWord.get(wordId)?.isCorrect).length;
+    const attempts = wordIds.flatMap(wordId => attemptsByWord.get(wordId) ?? []);
+    const correctAttempts = attempts.filter(attempt => attempt.isCorrect).length;
+    return { id: book.id, title: book.title, subject: book.subject, visibility: book.visibility, wordCount: wordIds.length, studiedWordCount, masteredWordCount, progressPercent: wordIds.length ? Math.round((masteredWordCount / wordIds.length) * 100) : 0, accuracyPercent: attempts.length ? Math.round((correctAttempts / attempts.length) * 100) : 0 };
+  });
+  const reviewWords = Array.from(latestByWord.entries()).filter(([, latest]) => !latest.isCorrect).map(([wordId, latest]) => {
+    const word = wordsById.get(wordId);
+    return word ? { ...word, missedAt: latest.answeredAt } : null;
+  }).filter((word): word is NonNullable<typeof word> => Boolean(word)).slice(0, 5);
+  const unstartedSets = sets.filter(set => set.words.length > 0 && set.words.every(word => !latestByWord.has(word.id))).slice(0, 3).map(set => ({ id: set.id, label: set.label, wordbookId: set.wordbookId, wordbookTitle: set.wordbookTitle, wordCount: set.words.length }));
+  return { wordbooks, reviewWords, unstartedSets };
 }
 
 export async function recordFocusSession(userId: number, input: { startedAt: Date; completedAt: Date; focusSeconds: number }) {

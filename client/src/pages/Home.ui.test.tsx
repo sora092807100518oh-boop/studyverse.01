@@ -6,6 +6,7 @@ const hooks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  invalidate: vi.fn().mockResolvedValue(undefined),
   announcements: [] as Array<{ id: number; title: string; body: string; publishedAt: Date }>,
 }));
 
@@ -15,6 +16,12 @@ vi.mock("@/lib/trpc", () => ({
       recordAnswer: {
         useMutation: () => ({ mutateAsync: hooks.mutateAsync }),
       },
+    },
+    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate } } }),
+    wordbooks: {
+      addWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
+      updateWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
+      deleteWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
     },
     classroom: {
       announcements: {
@@ -34,7 +41,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { CardsView, Header } from "./Home";
+import { BookDetail, CardsView, Header } from "./Home";
 
 const books = {
   英単語: [{
@@ -70,6 +77,7 @@ afterEach(() => {
   hooks.mutateAsync.mockReset();
   hooks.toastError.mockReset();
   hooks.toastSuccess.mockReset();
+  hooks.invalidate.mockClear();
   hooks.announcements = [];
   window.localStorage.clear();
 });
@@ -134,5 +142,16 @@ describe("ホーム通知UI", () => {
     expect(screen.getByText("学習ミッション")).toBeTruthy();
     expect(screen.getByText("今週の目標を確認しましょう。")).toBeTruthy();
     expect(notice.className).not.toContain("shadow-[0_0_18px");
+  });
+});
+
+describe("教室教材の編集制御UI", () => {
+  it("利用者が教室教材を開くと編集不可の理由を表示し、編集操作を出さない", () => {
+    render(<BookDetail book={{ id: "1", remoteId: 1, name: "教室の英単語", count: 1, scope: "教室公開", tone: "from-cyan-400 to-blue-500", canEdit: false, words: [{ id: 11, front: "observe", back: "観察する" }] }} subject="英単語" setBooks={vi.fn()} onPractice={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByText(/管理画面で作成された教室教材/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "単語を編集" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "単語を削除" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "単語を追加" })).toBeNull();
+    expect(screen.getByRole("button", { name: /この単語帳で練習する/ })).toBeTruthy();
   });
 });
