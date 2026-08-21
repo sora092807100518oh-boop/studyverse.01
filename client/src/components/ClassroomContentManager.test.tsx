@@ -83,7 +83,9 @@ describe("管理単語帳CSV", () => {
     hooks.managedBooks = [{ id: 9, title: "英語第1章", subject: "english", visibility: "classroom", classroomId: 5, wordCount: 1, words: [{ front: "observe", back: "観察する", reading: null }] }];
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     render(<ClassroomContentManager section="wordbooks" />);
-    fireEvent.click(screen.getByRole("button", { name: "CSV" }));
+    expect(screen.queryByText("教室教材を管理")).toBeNull();
+    expect(screen.queryByRole("button", { name: "教材を保存" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "CSVをダウンロード" }));
     expect(click).toHaveBeenCalled(); expect(document.querySelector('a[href^="data:text/csv"]')?.getAttribute("download")).toBe("英語第1章.csv"); expect(hooks.toastSuccess).toHaveBeenCalledWith("単語帳CSVをダウンロードしました。");
     click.mockRestore();
   });

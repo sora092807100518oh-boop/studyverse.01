@@ -26,6 +26,14 @@ import { LearningCalendar } from "./LearningCalendar";
 afterEach(() => { cleanup(); hooks.useTicket.mockClear(); hooks.invalidateDashboard.mockClear(); });
 
 describe("学習カレンダーの復活チケット", () => {
+  it("今日を青い円として表示する", () => {
+    const today = new Date();
+    render(<LearningCalendar />);
+    const todayButton = screen.getByRole("button", { name: String(today.getDate()) });
+    expect(todayButton.className).toContain("bg-cyan-400/20");
+    expect(todayButton.className).toContain("ring-cyan-300");
+  });
+
   it("学習記録がある選択日にも復活チケットの利用操作を表示して実行できる", async () => {
     const today = new Date();
     render(<LearningCalendar />);
