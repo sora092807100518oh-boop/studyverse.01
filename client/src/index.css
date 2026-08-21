@@ -19,6 +19,19 @@
 }
 
 :root {
+  --background: #f7fbff;
+  --foreground: #17233b;
+  --card: #ffffff;
+  --card-foreground: #17233b;
+  --primary: #168f9f;
+  --primary-foreground: #ffffff;
+  --muted: #e5edf7;
+  --muted-foreground: #5c6d86;
+  --border: rgba(47, 78, 122, .16);
+  --ring: #168f9f;
+}
+
+.dark {
   --background: #070d20;
   --foreground: #f6f8ff;
   --card: #101a35;
@@ -45,6 +58,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 .soft-grid { background-image: linear-gradient(rgba(119, 183, 255, .08) 1px, transparent 1px), linear-gradient(90deg, rgba(119, 183, 255, .08) 1px, transparent 1px); background-size: 28px 28px; }
 .nav-safe { padding-bottom: max(20px, env(safe-area-inset-bottom)); }
 .app-scroll { scrollbar-width: thin; scrollbar-color: rgba(135, 214, 255, .35) transparent; }
+
+:root:not(.dark) .sky-shell { background: radial-gradient(circle at 8% 3%, rgba(92, 204, 238, .21), transparent 31rem), radial-gradient(circle at 94% 18%, rgba(164, 148, 250, .16), transparent 25rem), linear-gradient(145deg, #f8fcff 0%, #eef7ff 46%, #fafaff 100%); }
+:root:not(.dark) .star-field { opacity: .12; }
+:root:not(.dark) .glass-card { background: linear-gradient(135deg, rgba(255,255,255,.92), rgba(241,248,255,.88)); border-color: rgba(55, 87, 132, .14); box-shadow: 0 14px 34px rgba(46, 83, 126, .12); }
+:root:not(.dark) .eyebrow { color: #087f92; }
+:root:not(.dark) .text-slate-50, :root:not(.dark) .text-slate-100, :root:not(.dark) .text-slate-200, :root:not(.dark) .text-slate-300 { color: #25344f; }
+:root:not(.dark) .text-slate-400, :root:not(.dark) .text-slate-500 { color: #62718a; }
+:root:not(.dark) .bg-slate-950\/35, :root:not(.dark) .bg-slate-950\/30 { background-color: rgba(226, 237, 249, .75); }
 
 @media (prefers-reduced-motion: no-preference) {
   .orb-float { animation: float 7s cubic-bezier(.23,1,.32,1) infinite alternate; }
