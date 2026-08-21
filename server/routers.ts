@@ -1,8 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveJournalEntry, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
-import { deleteSavedStudySet, getCalendarDashboard, listSavedStudySets, saveStudySet, updateOwnDisplayName, useRevivalTicket } from "./db";
-import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
+import { addWordToWordbook, authenticateWithPin, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
+import { deleteSavedStudySet, getCalendarDashboard, listSavedStudySets, resetRevivalTickets, saveStudySet, updateOwnDisplayName, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
@@ -26,8 +25,6 @@ function toUserMessage(error: unknown): never {
   if (code === "MONSTER_NOT_COMPLETE") throw new TRPCError({ code: "BAD_REQUEST", message: "最終進化に達してから新しいモンスターを育成できます。" });
   if (code === "MONSTER_EGG_UNAVAILABLE") throw new TRPCError({ code: "BAD_REQUEST", message: "選択した卵を持っていません。" });
   if (code === "MONSTER_IMAGE_INVALID") throw new TRPCError({ code: "BAD_REQUEST", message: "画像は5MB以下のPNG・JPEG・WebPを指定してください。" });
-  if (code === "NEWS_SOURCE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "今日の記事の取得元に接続できませんでした。通常生成をお試しください。" });
-  if (code === "JOURNAL_GENERATION_FAILED") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "記事を生成できませんでした。時間をおいて再試行してください。" });
   if (code === "DATABASE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "学習データを保存できません。時間をおいて再試行してください。" });
   if (code === "CSV_INVALID_ROWS") throw new TRPCError({ code: "BAD_REQUEST", message: "形式が正しくない行があります。プレビューを確認して修正してください。" });
   if (code === "CSV_LIMIT_EXCEEDED") throw new TRPCError({ code: "BAD_REQUEST", message: "CSVは3,000行以内にしてください。" });
@@ -176,17 +173,6 @@ export const appRouter = router({
       try { return await uploadMonsterImage(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
     }),
   }),
-  journal: router({
-    list: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]).optional() }).optional()).query(async ({ ctx, input }) => listJournalEntries(ctx.user.id, input?.subject)),
-    generate: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]), difficulty: z.string().trim().min(1).max(40), mode: z.enum(["normal", "today"]) })).mutation(async ({ ctx, input }) => {
-      try {
-        const source = input.mode === "today" ? await fetchTodayNewsSource() : undefined;
-        const article = await generateJournalArticle({ subject: input.subject, difficulty: input.difficulty, source });
-        const saved = await saveJournalEntry(ctx.user.id, { subject: input.subject, difficulty: input.difficulty, sourceType: source ? "news" : "ai", sourceTitle: source?.title, sourceUrl: source?.url, articleTitle: article.title, articleBody: article.body, questions: article.questions });
-        return { id: saved?.id, ...article, source: source ? { title: source.title, url: source.url, domain: source.domain } : null };
-      } catch (error) { return toUserMessage(error); }
-    }),
-  }),
   wordbooks: router({
     list: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]).optional() }).optional()).query(async ({ ctx, input }) => listVisibleWordbooks(ctx.user.id, input?.subject)),
     create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), subject: z.enum(["english", "kanji"]), visibility: z.enum(["private", "classroom"]).default("private"), classroomId: z.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
@@ -247,6 +233,9 @@ export const appRouter = router({
       }),
       resetPin: protectedProcedure.input(z.object({ profileId: z.number().int().positive(), pin: z.string().regex(/^\d{4}$/) })).mutation(async ({ ctx, input }) => {
         try { await resetPinForProfile(ctx.user.id, input); return { success: true }; } catch (error) { return toUserMessage(error); }
+      }),
+      resetRevivalTickets: protectedProcedure.input(z.object({ profileId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        try { return await resetRevivalTickets(ctx.user.id, input.profileId); } catch (error) { return toUserMessage(error); }
       }),
     }),
     announcements: router({

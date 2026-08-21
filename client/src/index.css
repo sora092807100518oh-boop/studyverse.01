@@ -29,6 +29,11 @@
   --muted-foreground: #5c6d86;
   --border: rgba(47, 78, 122, .16);
   --ring: #168f9f;
+  --hero-home: linear-gradient(135deg, #e7f6ff, #f1edff 52%, #eef9ff);
+  --hero-ai: linear-gradient(135deg, #f0ebff, #e6f4ff 52%, #f5fbff);
+  --surface-header: rgba(248, 252, 255, .92);
+  --surface-nav: rgba(248, 252, 255, .94);
+  --timer-core: #edf5ff;
 }
 
 .dark {
@@ -42,6 +47,11 @@
   --muted-foreground: #a9b5d0;
   --border: rgba(205, 224, 255, .14);
   --ring: #80eee6;
+  --hero-home: linear-gradient(135deg, #173b61, #18395b 52%, #18284f);
+  --hero-ai: linear-gradient(135deg, #37245d, #1d315b 52%, #102342);
+  --surface-header: rgba(8, 15, 37, .80);
+  --surface-nav: rgba(8, 14, 33, .90);
+  --timer-core: #111d3c;
 }
 
 * { border-color: var(--border); }
@@ -66,6 +76,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 :root:not(.dark) .text-slate-50, :root:not(.dark) .text-slate-100, :root:not(.dark) .text-slate-200, :root:not(.dark) .text-slate-300 { color: #25344f; }
 :root:not(.dark) .text-slate-400, :root:not(.dark) .text-slate-500 { color: #62718a; }
 :root:not(.dark) .bg-slate-950\/35, :root:not(.dark) .bg-slate-950\/30 { background-color: rgba(226, 237, 249, .75); }
+:root:not(.dark) .bg-slate-950\/25, :root:not(.dark) .bg-slate-950\/45 { background-color: rgba(226, 237, 249, .62); }
+:root:not(.dark) [class~="bg-[#080e21]/90"] { background-color: rgba(248, 252, 255, .94); }
+:root:not(.dark) [class~="bg-white/5"], :root:not(.dark) [class~="bg-white/8"], :root:not(.dark) [class~="bg-white/[.025]"], :root:not(.dark) [class~="bg-white/[.035]"] { background-color: rgba(61, 91, 134, .07); }
+:root:not(.dark) [class~="border-white/10"], :root:not(.dark) [class~="border-white/12"], :root:not(.dark) [class~="border-white/13"], :root:not(.dark) [class~="border-white/[.08]"], :root:not(.dark) [class~="border-white/16"] { border-color: rgba(63, 91, 132, .18); }
+:root:not(.dark) input, :root:not(.dark) textarea, :root:not(.dark) select { color: #25344f; }
+.theme-home-hero { background-image: var(--hero-home); }
+.theme-ai-hero { background-image: var(--hero-ai); }
+.theme-header { background-color: var(--surface-header); }
+.theme-nav { background-color: var(--surface-nav); }
+.theme-timer-core { background-color: var(--timer-core); }
 
 @media (prefers-reduced-motion: no-preference) {
   .orb-float { animation: float 7s cubic-bezier(.23,1,.32,1) infinite alternate; }

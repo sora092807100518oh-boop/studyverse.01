@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -502,7 +502,9 @@ async function getWordbookEditor(userId: number, wordbookId: number) {
   if (!book[0]) throw new Error("WORD_BOOK_NOT_FOUND");
   const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
   const profile = await getProfile(userId);
-  const canEdit = account[0]?.role === "admin" || book[0].ownerUserId === userId || ((profile?.profile.classroomRole === "teacher" || profile?.profile.classroomRole === "owner") && book[0].classroomId === profile.profile.classroomId);
+  const isClassroomMaterial = book[0].visibility === "classroom" || book[0].visibility === "global";
+  const canManageClassroomMaterial = (profile?.profile.classroomRole === "teacher" || profile?.profile.classroomRole === "owner") && book[0].classroomId === profile.profile.classroomId;
+  const canEdit = account[0]?.role === "admin" || (isClassroomMaterial ? canManageClassroomMaterial : book[0].ownerUserId === userId);
   if (!canEdit) throw new Error("WORD_BOOK_FORBIDDEN");
   return { db, book: book[0], isAdmin: account[0]?.role === "admin", profile };
 }
@@ -651,30 +653,6 @@ export async function recordFocusSession(userId: number, input: { startedAt: Dat
   await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "learning", action: "focus.completed", details: `${input.focusSeconds}s` });
 }
 
-export async function saveJournalEntry(userId: number, input: { subject: "english" | "kanji"; difficulty: string; sourceType: "ai" | "news"; sourceTitle?: string; sourceUrl?: string; articleTitle: string; articleBody: string; questions: Array<{ question: string; answer: string; explanation: string }> }) {
-  const db = await getDb();
-  if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const profile = await getProfile(userId);
-  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-  const fallbackClassroom = !profile && account[0]?.role === "admin" ? (await db.select({ id: classrooms.id }).from(classrooms).orderBy(desc(classrooms.createdAt)).limit(1))[0] : undefined;
-  const classroomId = profile?.profile.classroomId ?? fallbackClassroom?.id;
-  if (!classroomId) throw new Error("CLASSROOM_REQUIRED");
-  const inserted = await db.insert(journalEntries).values({ userId, classroomId, subject: input.subject, difficulty: input.difficulty, sourceType: input.sourceType, sourceTitle: input.sourceTitle ?? null, sourceUrl: input.sourceUrl ?? null, articleTitle: input.articleTitle, articleBody: input.articleBody, questionsJson: JSON.stringify(input.questions) }).$returningId();
-  await writeActivity({ actorUserId: userId, classroomId, category: "journal", action: "journal.generated", details: input.articleTitle });
-  return inserted[0];
-}
-
-export async function listJournalEntries(userId: number, subject?: "english" | "kanji") {
-  const db = await getDb();
-  if (!db) return [];
-  const rows = await db.select().from(journalEntries).where(subject ? and(eq(journalEntries.userId, userId), eq(journalEntries.subject, subject)) : eq(journalEntries.userId, userId)).orderBy(desc(journalEntries.createdAt)).limit(30);
-  return rows.map(row => {
-    let questions: Array<{ question: string; answer: string; explanation: string }> = [];
-    try { const parsed = JSON.parse(row.questionsJson); if (Array.isArray(parsed)) questions = parsed; } catch { /* 破損した履歴は設問なしとして安全に表示する */ }
-    return { ...row, questions };
-  });
-}
-
 export async function getLearningSummary(userId: number) {
   const db = await getDb();
   if (!db) return { totalFocusSeconds: 0, retention: 0, streak: 0, records: 0 };
@@ -770,7 +748,9 @@ export async function startNewMonster(userId: number, eggNumber: MonsterEggNumbe
   const egg = dashboard.eggs.find(item => item.eggNumber === eggNumber && !item.consumedAt);
   if (!egg) throw new Error("MONSTER_EGG_UNAVAILABLE");
   await db.update(monsterProfiles).set({ active: false, completedAt: dashboard.active.completedAt ?? new Date() }).where(eq(monsterProfiles.id, dashboard.active.id));
-  const created = await db.insert(monsterProfiles).values({ userId, eggNumber, active: true }).$returningId();
+  // MySQL timestamp columns can be second precision. Start from the next second so
+  // sessions completed immediately before the egg exchange never count toward the new monster.
+  const created = await db.insert(monsterProfiles).values({ userId, eggNumber, active: true, startedAt: new Date(Date.now() + 1_000) }).$returningId();
   const profileId = created[0]?.id;
   if (!profileId) throw new Error("MONSTER_PROFILE_CREATE_FAILED");
   await db.update(monsterEggs).set({ consumedAt: new Date(), monsterProfileId: profileId }).where(eq(monsterEggs.id, egg.id));
@@ -834,14 +814,14 @@ export async function getManagementInsights(userId: number) {
   const profile = await getProfile(userId);
   if (account[0]?.role !== "admin" && profile?.profile.classroomRole !== "owner" && profile?.profile.classroomRole !== "teacher") throw new Error("GLOBAL_MANAGER_REQUIRED");
   const classroomFilter = account[0]?.role === "admin" ? undefined : profile?.profile.classroomId;
-  const [members, sessions, records, journals, logs] = await Promise.all([
-    db.select().from(studentProfiles), db.select().from(focusSessions), db.select().from(studyRecords), db.select().from(journalEntries), db.select({ log: activityLogs, actorName: users.name, classroomName: classrooms.name }).from(activityLogs).leftJoin(users, eq(activityLogs.actorUserId, users.id)).leftJoin(classrooms, eq(activityLogs.classroomId, classrooms.id)).orderBy(desc(activityLogs.createdAt)).limit(40),
+  const [members, sessions, records, logs] = await Promise.all([
+    db.select().from(studentProfiles), db.select().from(focusSessions), db.select().from(studyRecords), db.select({ log: activityLogs, actorName: users.name, classroomName: classrooms.name }).from(activityLogs).leftJoin(users, eq(activityLogs.actorUserId, users.id)).leftJoin(classrooms, eq(activityLogs.classroomId, classrooms.id)).orderBy(desc(activityLogs.createdAt)).limit(40),
   ]);
   const include = (classroomId: number) => classroomFilter === undefined || classroomId === classroomFilter;
-  const scopedMembers = members.filter(member => member.classroomRole === "student" && include(member.classroomId)); const scopedSessions = sessions.filter(session => include(session.classroomId)); const scopedRecords = records.filter(record => include(record.classroomId)); const scopedJournals = journals.filter(entry => include(entry.classroomId));
+  const scopedMembers = members.filter(member => member.classroomRole === "student" && include(member.classroomId)); const scopedSessions = sessions.filter(session => include(session.classroomId)); const scopedRecords = records.filter(record => include(record.classroomId));
   const totalFocusSeconds = scopedSessions.reduce((sum, session) => sum + session.focusSeconds, 0);
   const correct = scopedRecords.filter(record => record.isCorrect).length;
-  return { memberCount: scopedMembers.length, totalFocusSeconds, answers: scopedRecords.length, retention: scopedRecords.length ? Math.round((correct / scopedRecords.length) * 100) : 0, journalCount: scopedJournals.length, recentActivities: logs.filter(row => classroomFilter === undefined ? true : row.log.classroomId !== null && include(row.log.classroomId)).map(row => ({ id: row.log.id, category: row.log.category, action: row.log.action, details: row.log.details, createdAt: row.log.createdAt, actorName: row.actorName ?? "管理者", classroomName: row.classroomName ?? "全体" })) };
+  return { memberCount: scopedMembers.length, totalFocusSeconds, answers: scopedRecords.length, retention: scopedRecords.length ? Math.round((correct / scopedRecords.length) * 100) : 0, recentActivities: logs.filter(row => classroomFilter === undefined ? true : row.log.classroomId !== null && include(row.log.classroomId)).map(row => ({ id: row.log.id, category: row.log.category, action: row.log.action, details: row.log.details, createdAt: row.log.createdAt, actorName: row.actorName ?? "管理者", classroomName: row.classroomName ?? "全体" })) };
 }
 
 const japanDateKey = (value: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit" }).format(value);
@@ -876,3 +856,18 @@ export async function getCalendarDashboard(userId: number) {
 }
 
 export async function useRevivalTicket(userId: number, dateKey: string) { const profile = await getProfile(userId); if (!profile) throw new Error("CLASSROOM_REQUIRED"); if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) throw new Error("REVIVAL_DATE_INVALID"); if (profile.profile.revivalTickets < 1) throw new Error("REVIVAL_TICKET_EMPTY"); const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); await db.insert(revivalDays).values({ userId, dateKey }); await db.update(studentProfiles).set({ revivalTickets: profile.profile.revivalTickets - 1 }).where(eq(studentProfiles.id, profile.profile.id)); }
+
+export async function resetRevivalTickets(actorUserId: number, profileId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const target = await db.select().from(studentProfiles).where(eq(studentProfiles.id, profileId)).limit(1);
+  if (!target[0]) throw new Error("PROFILE_NOT_FOUND");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, actorUserId)).limit(1);
+  const membership = await getProfile(actorUserId);
+  const permissionInput = { siteRole: account[0]?.role, classroomRole: membership?.profile.classroomRole, actorClassroomId: membership?.profile.classroomId, targetClassroomId: target[0].classroomId } as const;
+  if (!membership && account[0]?.role !== "admin") throw new Error("CLASSROOM_REQUIRED");
+  if (!canManageClassroom(permissionInput)) throw new Error("CLASSROOM_MANAGER_REQUIRED");
+  await db.update(studentProfiles).set({ revivalTickets: 2 }).where(eq(studentProfiles.id, profileId));
+  await writeActivity({ actorUserId, classroomId: target[0].classroomId, category: "member", action: "revival_tickets.reset", details: `profile:${profileId}` });
+  return { revivalTickets: 2 };
+}

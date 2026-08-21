@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { authenticateWithPin, createClassroom, createPinAccount, getDb, getManagementInsights, getOrCreateSiteAdmin, listJournalEntries, recordLearningResult, resetPinForProfile, saveJournalEntry } from "./db";
-import { activityLogs, classrooms, focusSessions, journalEntries, pinSessions, studentProfiles, studyRecords, users } from "../drizzle/schema";
-import { inArray } from "drizzle-orm";
+import { authenticateWithPin, createClassroom, createPinAccount, getDb, getManagementInsights, getOrCreateSiteAdmin, recordLearningResult, resetPinForProfile, resetRevivalTickets } from "./db";
+import { activityLogs, classrooms, focusSessions, pinSessions, studentProfiles, studyRecords, users } from "../drizzle/schema";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll } from "vitest";
 
 const createdRoomIds = new Set<number>();
@@ -16,7 +16,6 @@ afterAll(async () => {
     await db.delete(activityLogs).where(inArray(activityLogs.classroomId, roomIds));
     await db.delete(studyRecords).where(inArray(studyRecords.classroomId, roomIds));
     await db.delete(focusSessions).where(inArray(focusSessions.classroomId, roomIds));
-    await db.delete(journalEntries).where(inArray(journalEntries.classroomId, roomIds));
     await db.delete(pinSessions).where(inArray(pinSessions.classroomId, roomIds));
     await db.delete(studentProfiles).where(inArray(studentProfiles.classroomId, roomIds));
     await db.delete(classrooms).where(inArray(classrooms.id, roomIds));
@@ -78,16 +77,17 @@ describe("独立全体管理者の教室初期設定フロー", () => {
     expect(first.profile.displayName).toMatch(/^学習者 \d+$/);
   }, 15_000);
 
-  it("教室プロフィールを持たない全体管理者も最新の教室へJournalを保存できる", async () => {
+  it("全体管理者は利用者の復活チケットを2枚へ補充できる", async () => {
     const admin = await getOrCreateSiteAdmin(); const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
-    const room = await createClassroom(admin.id, { code: `JOURNAL-${suffix}`.slice(0, 32), name: `Journal保存検証 ${suffix}` });
+    const room = await createClassroom(admin.id, { code: `TICKET-${suffix}`.slice(0, 32), name: `チケット補充検証 ${suffix}` });
     createdRoomIds.add(room.id);
-    const saved = await saveJournalEntry(admin.id, { subject: "english", difficulty: "basic", sourceType: "news", articleTitle: "Fallback save", articleBody: "A neutral reading passage for verifying that a site administrator can save a journal entry even without a classroom profile.", questions: [{ question: "Q1", answer: "A1", explanation: "E1" }, { question: "Q2", answer: "A2", explanation: "E2" }, { question: "Q3", answer: "A3", explanation: "E3" }] });
-    expect(saved.id).toBeGreaterThan(0);
-    const kanjiTitle = `漢字フィルター確認 ${suffix}`;
-    await saveJournalEntry(admin.id, { subject: "kanji", difficulty: "basic", sourceType: "ai", articleTitle: kanjiTitle, articleBody: "漢字の読解確認用です。", questions: [{ question: "Q1", answer: "A1", explanation: "E1" }, { question: "Q2", answer: "A2", explanation: "E2" }, { question: "Q3", answer: "A3", explanation: "E3" }] });
-    expect((await listJournalEntries(admin.id, "kanji")).some(entry => entry.articleTitle === kanjiTitle)).toBe(true);
-    expect((await listJournalEntries(admin.id, "english")).some(entry => entry.articleTitle === kanjiTitle)).toBe(false);
+    const learner = await createPinAccount(admin.id, { classroomId: room.id, displayName: "チケット対象", pin: "1357" });
+    createdUserIds.add(learner.userId);
+    const db = await getDb();
+    await db!.update(studentProfiles).set({ revivalTickets: 0 }).where(eq(studentProfiles.id, learner.profileId!));
+    await expect(resetRevivalTickets(admin.id, learner.profileId!)).resolves.toEqual({ revivalTickets: 2 });
+    const profile = (await db!.select({ revivalTickets: studentProfiles.revivalTickets }).from(studentProfiles).where(eq(studentProfiles.id, learner.profileId!)).limit(1))[0];
+    expect(profile?.revivalTickets).toBe(2);
   }, 15_000);
 
   it("カード練習・テストの正誤履歴を保存し、管理記録から確認できる", async () => {

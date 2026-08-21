@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, journalEntries, pinSessions, recommendedTests, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, pinSessions, recommendedTests, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, previewWordbookCsv, recordFocusSession, recordLearningResult, updateAnnouncement, updateWordbook } from "./db";
 
 const createdClassroomIds = new Set<number>();
@@ -23,7 +23,6 @@ afterAll(async () => {
     await db.delete(announcements).where(inArray(announcements.classroomId, classroomIds));
     await db.delete(studyRecords).where(inArray(studyRecords.classroomId, classroomIds));
     await db.delete(focusSessions).where(inArray(focusSessions.classroomId, classroomIds));
-    await db.delete(journalEntries).where(inArray(journalEntries.classroomId, classroomIds));
     await db.delete(pinSessions).where(inArray(pinSessions.classroomId, classroomIds));
     await db.delete(studentProfiles).where(inArray(studentProfiles.classroomId, classroomIds));
     await db.delete(classrooms).where(inArray(classrooms.id, classroomIds));
