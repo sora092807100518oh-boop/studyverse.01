@@ -176,6 +176,46 @@ export const activityLogs = mysqlTable("activityLogs", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const monsterImageSettings = mysqlTable("monsterImageSettings", {
+  id: int("id").autoincrement().primaryKey(),
+  slotKey: varchar("slotKey", { length: 32 }).notNull(),
+  imageType: mysqlEnum("imageType", ["egg", "evolution"]).notNull(),
+  eggNumber: int("eggNumber"),
+  evolutionStage: int("evolutionStage"),
+  imageUrl: varchar("imageUrl", { length: 2048 }).notNull(),
+  updatedByUserId: int("updatedByUserId").notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [uniqueIndex("monster_image_settings_slot_key_unique").on(table.slotKey)]);
+
+export const monsterProfiles = mysqlTable("monsterProfiles", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  eggNumber: mysqlEnum("eggNumber", ["1", "2", "3"]).notNull(),
+  active: boolean("active").default(true).notNull(),
+  startedAt: timestamp("startedAt").defaultNow().notNull(),
+  completedAt: timestamp("completedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const monsterEggs = mysqlTable("monsterEggs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  eggNumber: mysqlEnum("eggNumber", ["1", "2", "3"]).notNull(),
+  source: mysqlEnum("source", ["starter", "focus_260", "focus_520", "completion"]).notNull(),
+  acquiredAt: timestamp("acquiredAt").defaultNow().notNull(),
+  consumedAt: timestamp("consumedAt"),
+  monsterProfileId: int("monsterProfileId"),
+});
+
+export const monsterMissionClaims = mysqlTable("monsterMissionClaims", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  missionKey: varchar("missionKey", { length: 96 }).notNull(),
+  periodKey: varchar("periodKey", { length: 16 }).notNull(),
+  points: int("points").notNull(),
+  claimedAt: timestamp("claimedAt").defaultNow().notNull(),
+}, table => [uniqueIndex("monster_mission_claims_user_mission_period_unique").on(table.userId, table.missionKey, table.periodKey)]);
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 export type Wordbook = typeof wordbooks.$inferSelect;

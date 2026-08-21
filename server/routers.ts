@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getLearningSummary, getLearningTrend, getManagementInsights, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveJournalEntry, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook } from "./db";
+import { addWordToWordbook, authenticateWithPin, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveJournalEntry, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
 import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -20,6 +20,11 @@ function toUserMessage(error: unknown): never {
   if (code === "PROFILE_NOT_FOUND" || code === "CLASSROOM_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "指定された情報が見つかりません。" });
   if (code === "CALENDAR_EVENT_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "指定された予定が見つかりません。" });
   if (code === "CALENDAR_EVENT_FORBIDDEN") throw new TRPCError({ code: "FORBIDDEN", message: "この予定を削除する権限がありません。" });
+  if (code === "MONSTER_MISSION_NOT_READY") throw new TRPCError({ code: "BAD_REQUEST", message: "このミッションはまだ達成されていません。" });
+  if (code === "MONSTER_MISSION_ALREADY_CLAIMED") throw new TRPCError({ code: "CONFLICT", message: "この報酬はすでに受け取っています。" });
+  if (code === "MONSTER_NOT_COMPLETE") throw new TRPCError({ code: "BAD_REQUEST", message: "最終進化に達してから新しいモンスターを育成できます。" });
+  if (code === "MONSTER_EGG_UNAVAILABLE") throw new TRPCError({ code: "BAD_REQUEST", message: "選択した卵を持っていません。" });
+  if (code === "MONSTER_IMAGE_INVALID") throw new TRPCError({ code: "BAD_REQUEST", message: "画像は5MB以下のPNG・JPEG・WebPを指定してください。" });
   if (code === "NEWS_SOURCE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "今日の記事の取得元に接続できませんでした。通常生成をお試しください。" });
   if (code === "JOURNAL_GENERATION_FAILED") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "記事を生成できませんでした。時間をおいて再試行してください。" });
   if (code === "DATABASE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "学習データを保存できません。時間をおいて再試行してください。" });
@@ -124,6 +129,9 @@ export const appRouter = router({
     recordAnswer: protectedProcedure.input(z.object({ wordId: z.number().int().positive().optional(), mode: z.enum(["practice", "test", "journal", "ai_select"]), isCorrect: z.boolean() })).mutation(async ({ ctx, input }) => {
       try { await recordLearningResult(ctx.user.id, input); return { success: true }; } catch (error) { return toUserMessage(error); }
     }),
+    completeAiSelect: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]) })).mutation(async ({ ctx, input }) => {
+      try { await recordAiSelectCompletion(ctx.user.id, input.subject); return { success: true }; } catch (error) { return toUserMessage(error); }
+    }),
     review: protectedProcedure.query(async ({ ctx }) => {
       try { return await listReviewWords(ctx.user.id); } catch (error) { return toUserMessage(error); }
     }),
@@ -134,6 +142,23 @@ export const appRouter = router({
   management: router({
     insights: protectedProcedure.query(async ({ ctx }) => {
       try { return await getManagementInsights(ctx.user.id); } catch (error) { return toUserMessage(error); }
+    }),
+  }),
+  monster: router({
+    images: protectedProcedure.query(async ({ ctx }) => {
+      try { return await listMonsterImageSettings(ctx.user.id); } catch (error) { return toUserMessage(error); }
+    }),
+    dashboard: protectedProcedure.query(async ({ ctx }) => {
+      try { return await getMonsterDashboard(ctx.user.id); } catch (error) { return toUserMessage(error); }
+    }),
+    claim: protectedProcedure.input(z.object({ missionKey: z.string().min(1).max(96), periodKey: z.string().min(1).max(16) })).mutation(async ({ ctx, input }) => {
+      try { return await claimMonsterMission(ctx.user.id, input.missionKey, input.periodKey); } catch (error) { return toUserMessage(error); }
+    }),
+    startNew: protectedProcedure.input(z.object({ eggNumber: z.enum(["1", "2", "3"]) })).mutation(async ({ ctx, input }) => {
+      try { return await startNewMonster(ctx.user.id, input.eggNumber); } catch (error) { return toUserMessage(error); }
+    }),
+    uploadImage: protectedProcedure.input(z.object({ slotKey: z.string().regex(/^(egg-[1-3]|evolution-(?:[1-9]|1[0-3]))$/), imageType: z.enum(["egg", "evolution"]), eggNumber: z.number().int().min(1).max(3).optional(), evolutionStage: z.number().int().min(1).max(13).optional(), dataUrl: z.string().max(7_000_000) })).mutation(async ({ ctx, input }) => {
+      try { return await uploadMonsterImage(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
     }),
   }),
   journal: router({

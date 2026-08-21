@@ -1,13 +1,15 @@
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, pinLoginAttempts, pinSessions, recommendedTests, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
 import { createSiteAdminSessionToken, getSiteAdminSessionTokenHash } from "./site-admin-auth";
 import { createTeacherAdminSessionToken, getTeacherAdminSessionTokenHash } from "./teacher-admin-auth";
 import { previewVocabularyRows } from "./studyverse.utils";
+import { buildMissionState, calculateMonsterStage } from "./monster";
+import { storagePut } from "./storage";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -218,6 +220,7 @@ export async function authenticateWithPin(input: { classroomCode: string; pin: s
   const tokenHash = getSessionTokenHash(token, getPinPepper());
   const expiresAt = new Date(Date.now() + PIN_SESSION_TTL_MS);
   await db.insert(pinSessions).values({ tokenHash, profileId: profile[0].id, userId: profile[0].userId, classroomId: classroom[0].id, expiresAt });
+  await writeActivity({ actorUserId: profile[0].userId, classroomId: classroom[0].id, category: "learning", action: "login.success", details: "pin" });
   return { token, expiresAt, profile: { id: profile[0].id, userId: profile[0].userId, displayName: profile[0].displayName, classroomRole: profile[0].classroomRole }, classroom: { id: classroom[0].id, code: classroom[0].code, name: classroom[0].name } };
 }
 
@@ -685,6 +688,114 @@ export async function getLearningSummary(userId: number) {
   let streak = 0;
   for (let offset = 0; offset < 365; offset += 1) { const date = new Date(); date.setUTCDate(date.getUTCDate() - offset); if (activeDays.has(date.toISOString().slice(0, 10))) streak += 1; else if (offset > 0) break; }
   return { totalFocusSeconds, retention, streak, records: records.length };
+}
+
+type MonsterEggNumber = "1" | "2" | "3";
+
+async function createInitialMonsterProfile(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const egg = await db.insert(monsterEggs).values({ userId, eggNumber: "1", source: "starter", consumedAt: new Date() }).$returningId();
+  const profile = await db.insert(monsterProfiles).values({ userId, eggNumber: "1", active: true }).$returningId();
+  const profileId = profile[0]?.id;
+  if (!profileId) throw new Error("MONSTER_PROFILE_CREATE_FAILED");
+  if (egg[0]?.id) await db.update(monsterEggs).set({ monsterProfileId: profileId }).where(eq(monsterEggs.id, egg[0].id));
+  return (await db.select().from(monsterProfiles).where(eq(monsterProfiles.id, profileId)).limit(1))[0];
+}
+
+async function ensureMonsterEgg(userId: number, eggNumber: MonsterEggNumber, source: "focus_260" | "focus_520") {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const existing = await db.select().from(monsterEggs).where(and(eq(monsterEggs.userId, userId), eq(monsterEggs.source, source))).limit(1);
+  if (!existing[0]) await db.insert(monsterEggs).values({ userId, eggNumber, source });
+}
+
+export async function getMonsterDashboard(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const [sessions, records, activities, claims, profiles] = await Promise.all([
+    db.select().from(focusSessions).where(eq(focusSessions.userId, userId)),
+    db.select().from(studyRecords).where(eq(studyRecords.userId, userId)).orderBy(desc(studyRecords.answeredAt)),
+    db.select({ action: activityLogs.action, details: activityLogs.details, createdAt: activityLogs.createdAt }).from(activityLogs).where(eq(activityLogs.actorUserId, userId)).orderBy(desc(activityLogs.createdAt)),
+    db.select().from(monsterMissionClaims).where(eq(monsterMissionClaims.userId, userId)),
+    db.select().from(monsterProfiles).where(eq(monsterProfiles.userId, userId)).orderBy(desc(monsterProfiles.createdAt)),
+  ]);
+  const totalFocusSeconds = sessions.reduce((sum, session) => sum + session.focusSeconds, 0);
+  if (totalFocusSeconds >= 260 * 60 * 60) await ensureMonsterEgg(userId, "2", "focus_260");
+  if (totalFocusSeconds >= 520 * 60 * 60) await ensureMonsterEgg(userId, "3", "focus_520");
+  let active = profiles.find(profile => profile.active);
+  if (!active) active = await createInitialMonsterProfile(userId);
+  if (!active) throw new Error("MONSTER_PROFILE_NOT_FOUND");
+  const allProfiles = profiles.some(profile => profile.id === active!.id) ? profiles : [active, ...profiles];
+  const mission = buildMissionState({ startedAt: active.startedAt, records, activities });
+  const claimedKeys = new Set(claims.map(claim => `${claim.missionKey}:${claim.periodKey}`));
+  const claimedPointsSinceStart = claims.filter(claim => claim.claimedAt >= active!.startedAt).reduce((sum, claim) => sum + claim.points, 0);
+  const focusSecondsSinceStart = sessions.filter(session => session.completedAt >= active!.startedAt).reduce((sum, session) => sum + session.focusSeconds, 0);
+  const activeProgress = calculateMonsterStage(focusSecondsSinceStart, claimedPointsSinceStart);
+  if (activeProgress.stage === 13 && !active.completedAt) await db.update(monsterProfiles).set({ completedAt: new Date() }).where(eq(monsterProfiles.id, active.id));
+  const eggs = await db.select().from(monsterEggs).where(eq(monsterEggs.userId, userId)).orderBy(desc(monsterEggs.acquiredAt));
+  const images = await db.select().from(monsterImageSettings).orderBy(monsterImageSettings.slotKey);
+  const history = allProfiles.map(profile => {
+    const profileFocus = sessions.filter(session => session.completedAt >= profile.startedAt && (!profile.completedAt || session.completedAt <= profile.completedAt)).reduce((sum, session) => sum + session.focusSeconds, 0);
+    const profilePoints = claims.filter(claim => claim.claimedAt >= profile.startedAt && (!profile.completedAt || claim.claimedAt <= profile.completedAt)).reduce((sum, claim) => sum + claim.points, 0);
+    return { ...profile, progression: calculateMonsterStage(profileFocus, profilePoints) };
+  });
+  return { active: { ...active, progression: activeProgress }, totalFocusSeconds, claimedPoints: claimedPointsSinceStart, eggs, history, images, mission: { daily: mission.daily, monthly: mission.monthly, claimable: mission.rewards.filter(reward => !claimedKeys.has(`${reward.missionKey}:${reward.periodKey}`)), claimedKeys: Array.from(claimedKeys) } };
+}
+
+export async function claimMonsterMission(userId: number, missionKey: string, periodKey: string) {
+  const dashboard = await getMonsterDashboard(userId);
+  const reward = [...dashboard.mission.daily.rewards, ...dashboard.mission.monthly.rewards].find(item => item.missionKey === missionKey && item.periodKey === periodKey);
+  if (!reward) throw new Error("MONSTER_MISSION_NOT_READY");
+  if (dashboard.mission.claimedKeys.includes(`${missionKey}:${periodKey}`)) throw new Error("MONSTER_MISSION_ALREADY_CLAIMED");
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await db.insert(monsterMissionClaims).values({ userId, missionKey, periodKey, points: reward.points });
+  const profile = await getProfile(userId);
+  await writeActivity({ actorUserId: userId, classroomId: profile?.profile.classroomId, category: "learning", action: "monster.mission_claimed", details: reward.label });
+  return { points: reward.points, label: reward.label };
+}
+
+export async function recordAiSelectCompletion(userId: number, subject: "english" | "kanji") {
+  const profile = await getProfile(userId);
+  if (!profile) throw new Error("CLASSROOM_REQUIRED");
+  await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "learning", action: "ai_select.completed", details: subject });
+}
+
+export async function startNewMonster(userId: number, eggNumber: MonsterEggNumber) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const dashboard = await getMonsterDashboard(userId);
+  if (dashboard.active.progression.stage !== 13) throw new Error("MONSTER_NOT_COMPLETE");
+  const egg = dashboard.eggs.find(item => item.eggNumber === eggNumber && !item.consumedAt);
+  if (!egg) throw new Error("MONSTER_EGG_UNAVAILABLE");
+  await db.update(monsterProfiles).set({ active: false, completedAt: dashboard.active.completedAt ?? new Date() }).where(eq(monsterProfiles.id, dashboard.active.id));
+  const created = await db.insert(monsterProfiles).values({ userId, eggNumber, active: true }).$returningId();
+  const profileId = created[0]?.id;
+  if (!profileId) throw new Error("MONSTER_PROFILE_CREATE_FAILED");
+  await db.update(monsterEggs).set({ consumedAt: new Date(), monsterProfileId: profileId }).where(eq(monsterEggs.id, egg.id));
+  return { profileId };
+}
+
+export async function uploadMonsterImage(userId: number, input: { slotKey: string; imageType: "egg" | "evolution"; eggNumber?: number; evolutionStage?: number; dataUrl: string }) {
+  await requireGlobalAdmin(userId);
+  const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-zA-Z0-9+/=]+)$/.exec(input.dataUrl);
+  if (!match) throw new Error("MONSTER_IMAGE_INVALID");
+  const contentType = match[1]; const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 5_000_000) throw new Error("MONSTER_IMAGE_INVALID");
+  const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const uploaded = await storagePut(`monsters/${input.slotKey}.${extension}`, buffer, contentType);
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await db.insert(monsterImageSettings).values({ slotKey: input.slotKey, imageType: input.imageType, eggNumber: input.eggNumber ?? null, evolutionStage: input.evolutionStage ?? null, imageUrl: uploaded.url, updatedByUserId: userId }).onDuplicateKeyUpdate({ set: { imageType: input.imageType, eggNumber: input.eggNumber ?? null, evolutionStage: input.evolutionStage ?? null, imageUrl: uploaded.url, updatedByUserId: userId, updatedAt: new Date() } });
+  return { url: uploaded.url };
+}
+
+export async function listMonsterImageSettings(userId: number) {
+  await requireGlobalAdmin(userId);
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  return db.select().from(monsterImageSettings).orderBy(monsterImageSettings.slotKey);
 }
 
 type LearningTrendPeriod = "day" | "week" | "month";
