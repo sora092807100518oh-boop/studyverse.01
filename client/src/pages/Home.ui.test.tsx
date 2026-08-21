@@ -6,6 +6,7 @@ const hooks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  announcements: [] as Array<{ id: number; title: string; body: string; publishedAt: Date }>,
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -15,8 +16,15 @@ vi.mock("@/lib/trpc", () => ({
         useMutation: () => ({ mutateAsync: hooks.mutateAsync }),
       },
     },
+    classroom: {
+      announcements: {
+        list: { useQuery: () => ({ data: hooks.announcements, isLoading: false, isError: false, refetch: vi.fn() }) },
+      },
+    },
   },
 }));
+
+vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: vi.fn() }) }));
 
 vi.mock("sonner", () => ({
   toast: {
@@ -26,7 +34,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { CardsView } from "./Home";
+import { CardsView, Header } from "./Home";
 
 const books = {
   英単語: [{
@@ -62,6 +70,8 @@ afterEach(() => {
   hooks.mutateAsync.mockReset();
   hooks.toastError.mockReset();
   hooks.toastSuccess.mockReset();
+  hooks.announcements = [];
+  window.localStorage.clear();
 });
 
 describe("カード回答の記録UI", () => {
@@ -110,5 +120,19 @@ describe("カード回答の記録UI", () => {
     expect(screen.getByText("正解の漢字")).toBeTruthy();
     expect((screen.getByRole("button", { name: "次の問題" }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByText("学習を記録しました")).toBeNull();
+  });
+});
+
+describe("ホーム通知UI", () => {
+  it("新着お知らせがある通知マークを光らせ、タップで一覧を開いて既読表示へ切り替える", () => {
+    hooks.announcements = [{ id: 1, title: "学習ミッション", body: "今週の目標を確認しましょう。", publishedAt: new Date("2026-08-21T09:00:00Z") }];
+    render(<Header page="ホーム" onBack={vi.fn()} onProfile={vi.fn()} />);
+    const notice = screen.getByRole("button", { name: "お知らせを開く" });
+    expect(notice.className).toContain("shadow-[0_0_18px");
+    fireEvent.click(notice);
+    expect(screen.getByRole("heading", { name: "お知らせ" })).toBeTruthy();
+    expect(screen.getByText("学習ミッション")).toBeTruthy();
+    expect(screen.getByText("今週の目標を確認しましょう。")).toBeTruthy();
+    expect(notice.className).not.toContain("shadow-[0_0_18px");
   });
 });
