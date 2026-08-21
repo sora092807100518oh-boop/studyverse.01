@@ -382,17 +382,31 @@ export async function listVisibleCalendarEvents(userId: number) {
   const db = await getDb();
   if (!db) return [];
   const profile = await getProfile(userId);
-  const visible = profile ? or(eq(calendarEvents.visibility, "global"), and(eq(calendarEvents.visibility, "classroom"), eq(calendarEvents.classroomId, profile.profile.classroomId))) : eq(calendarEvents.visibility, "global");
+  const personal = and(eq(calendarEvents.visibility, "personal"), eq(calendarEvents.authorUserId, userId));
+  const visible = profile ? or(personal, eq(calendarEvents.visibility, "global"), and(eq(calendarEvents.visibility, "classroom"), eq(calendarEvents.classroomId, profile.profile.classroomId))) : or(personal, eq(calendarEvents.visibility, "global"));
   return db.select().from(calendarEvents).where(visible).orderBy(desc(calendarEvents.startsAt));
 }
 
-export async function createCalendarEvent(userId: number, input: { title: string; startsAt: Date; endsAt?: Date; visibility: "classroom" | "global" }) {
+export async function createCalendarEvent(userId: number, input: { title: string; startsAt: Date; endsAt?: Date; visibility: "personal" | "classroom" | "global" }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  if (input.visibility === "personal") {
+    const result = await db.insert(calendarEvents).values({ classroomId: null, authorUserId: userId, ...input, endsAt: input.endsAt ?? null }).$returningId();
+    return result[0];
+  }
   const profile = await requireClassroomManager(userId);
   if (input.visibility === "global" && profile.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
   const result = await db.insert(calendarEvents).values({ classroomId: input.visibility === "classroom" ? profile.profile.classroomId : null, authorUserId: userId, ...input, endsAt: input.endsAt ?? null }).$returningId();
   return result[0];
+}
+
+export async function deletePersonalCalendarEvent(userId: number, calendarEventId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const event = (await db.select().from(calendarEvents).where(eq(calendarEvents.id, calendarEventId)).limit(1))[0];
+  if (!event) throw new Error("CALENDAR_EVENT_NOT_FOUND");
+  if (event.visibility !== "personal" || event.authorUserId !== userId) throw new Error("CALENDAR_EVENT_FORBIDDEN");
+  await db.delete(calendarEvents).where(eq(calendarEvents.id, calendarEventId));
 }
 
 async function getRecommendedTestClassroomId(userId: number, requestedClassroomId?: number) {
@@ -566,6 +580,12 @@ export async function exportWordbookCsv(userId: number, wordbookId: number) {
   const { db, book } = await getWordbookEditor(userId, wordbookId);
   const words = await db.select({ front: vocabularyWords.front, back: vocabularyWords.back, reading: vocabularyWords.reading }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, wordbookId)).orderBy(vocabularyWords.id);
   return { title: book.title, words };
+}
+
+export async function downloadVisibleWordbookCsv(userId: number, wordbookId: number) {
+  const book = (await listVisibleWordbooks(userId)).find(item => item.id === wordbookId);
+  if (!book) throw new Error("WORD_BOOK_NOT_FOUND");
+  return { title: book.title, words: book.words.map(word => ({ front: word.front, back: word.back, reading: word.reading })) };
 }
 
 export async function listManageableWordbooks(userId: number) {

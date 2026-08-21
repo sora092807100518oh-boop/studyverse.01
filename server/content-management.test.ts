@@ -1,14 +1,17 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
-import { activityLogs, announcements, classrooms, focusSessions, journalEntries, pinSessions, recommendedTests, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
-import { createAnnouncement, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, previewWordbookCsv, recordFocusSession, recordLearningResult, updateAnnouncement, updateWordbook } from "./db";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, journalEntries, pinSessions, recommendedTests, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, previewWordbookCsv, recordFocusSession, recordLearningResult, updateAnnouncement, updateWordbook } from "./db";
 
 const createdClassroomIds = new Set<number>();
 const createdUserIds = new Set<number>();
+const createdCalendarEventIds = new Set<number>();
 
 afterAll(async () => {
   const db = await getDb();
   if (!db) return;
+  const calendarEventIds = [...createdCalendarEventIds];
+  if (calendarEventIds.length) await db.delete(calendarEvents).where(inArray(calendarEvents.id, calendarEventIds));
   const classroomIds = [...createdClassroomIds];
   if (classroomIds.length) {
     const books = await db.select({ id: wordbooks.id }).from(wordbooks).where(inArray(wordbooks.classroomId, classroomIds));
@@ -98,4 +101,17 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     await recordLearningResult(learner.userId, { wordId: words[0].id, mode: "practice", isCorrect: true }); expect((await listReviewWords(learner.userId)).map(word => word.id)).not.toContain(words[0].id);
     await deleteRecommendedTest(admin.id, assignment.id); expect((await listManageableRecommendedTests(admin.id)).some(item => item.id === assignment.id)).toBe(false);
   }, 20_000);
+
+  it("学習者は自分の予定だけを登録・削除でき、他の学習者には表示されない", async () => {
+    const admin = await getOrCreateSiteAdmin(); const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+    const room = await createClassroom(admin.id, { code: `CAL-${suffix}`.slice(0, 32), name: `予定検証教室 ${suffix}` }); createdClassroomIds.add(room.id);
+    const learner = await createPinAccount(admin.id, { classroomId: room.id, displayName: "予定登録者", pin: "1357" }); createdUserIds.add(learner.userId);
+    const otherLearner = await createPinAccount(admin.id, { classroomId: room.id, displayName: "予定閲覧者", pin: "2468" }); createdUserIds.add(otherLearner.userId);
+    const event = await createCalendarEvent(learner.userId, { title: "英単語の復習", startsAt: new Date(Date.now() + 60 * 60 * 1000), visibility: "personal" }); createdCalendarEventIds.add(event.id);
+    expect((await listVisibleCalendarEvents(learner.userId)).some(item => item.id === event.id)).toBe(true);
+    expect((await listVisibleCalendarEvents(otherLearner.userId)).some(item => item.id === event.id)).toBe(false);
+    await expect(deletePersonalCalendarEvent(otherLearner.userId, event.id)).rejects.toThrow("CALENDAR_EVENT_FORBIDDEN");
+    await deletePersonalCalendarEvent(learner.userId, event.id); createdCalendarEventIds.delete(event.id);
+    expect((await listVisibleCalendarEvents(learner.userId)).some(item => item.id === event.id)).toBe(false);
+  }, 15_000);
 });

@@ -71,6 +71,13 @@
       "when": 1787308966933,
       "tag": "0009_uneven_leopardon",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "5",
+      "when": 1787315296838,
+      "tag": "0010_dapper_lethal_legion",
+      "breakpoints": true
     }
   ]
 }

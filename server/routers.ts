@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, exportWordbookCsv, getLearningSummary, getLearningTrend, getManagementInsights, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveJournalEntry, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook } from "./db";
+import { addWordToWordbook, authenticateWithPin, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getLearningSummary, getLearningTrend, getManagementInsights, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listJournalEntries, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveJournalEntry, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook } from "./db";
 import { fetchTodayNewsSource, generateJournalArticle } from "./journal";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -18,6 +18,8 @@ function toUserMessage(error: unknown): never {
   if (code === "INVALID_PIN_LOGIN") throw new TRPCError({ code: "UNAUTHORIZED", message: "PINまたは教室コードが正しくありません。" });
   if (code === "TEACHER_ID_NOT_FOUND") throw new TRPCError({ code: "UNAUTHORIZED", message: "先生IDが正しくないか、担当教室が設定されていません。" });
   if (code === "PROFILE_NOT_FOUND" || code === "CLASSROOM_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "指定された情報が見つかりません。" });
+  if (code === "CALENDAR_EVENT_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "指定された予定が見つかりません。" });
+  if (code === "CALENDAR_EVENT_FORBIDDEN") throw new TRPCError({ code: "FORBIDDEN", message: "この予定を削除する権限がありません。" });
   if (code === "NEWS_SOURCE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "今日の記事の取得元に接続できませんでした。通常生成をお試しください。" });
   if (code === "JOURNAL_GENERATION_FAILED") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "記事を生成できませんでした。時間をおいて再試行してください。" });
   if (code === "DATABASE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "学習データを保存できません。時間をおいて再試行してください。" });
@@ -169,6 +171,9 @@ export const appRouter = router({
     exportCsv: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       try { return await exportWordbookCsv(ctx.user.id, input.wordbookId); } catch (error) { return toUserMessage(error); }
     }),
+    downloadCsv: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+      try { return await downloadVisibleWordbookCsv(ctx.user.id, input.wordbookId); } catch (error) { return toUserMessage(error); }
+    }),
     managed: protectedProcedure.query(async ({ ctx }) => {
       try { return await listManageableWordbooks(ctx.user.id); } catch (error) { return toUserMessage(error); }
     }),
@@ -225,9 +230,12 @@ export const appRouter = router({
     }),
     calendar: router({
       list: protectedProcedure.query(async ({ ctx }) => listVisibleCalendarEvents(ctx.user.id)),
-      create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), startsAt: z.date(), endsAt: z.date().optional(), visibility: z.enum(["classroom", "global"]).default("classroom") })).mutation(async ({ ctx, input }) => {
+      create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), startsAt: z.date(), endsAt: z.date().optional(), visibility: z.enum(["personal", "classroom", "global"]).default("classroom") })).mutation(async ({ ctx, input }) => {
         if (input.endsAt && input.endsAt < input.startsAt) throw new TRPCError({ code: "BAD_REQUEST", message: "終了時刻は開始時刻より後にしてください。" });
         try { return await createCalendarEvent(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
+      }),
+      deletePersonal: protectedProcedure.input(z.object({ calendarEventId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        try { await deletePersonalCalendarEvent(ctx.user.id, input.calendarEventId); return { success: true }; } catch (error) { return toUserMessage(error); }
       }),
     }),
     recommendedTests: router({

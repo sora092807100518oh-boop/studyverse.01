@@ -1,0 +1,1 @@
+ALTER TABLE `calendarEvents` MODIFY COLUMN `visibility` enum('personal','classroom','global') NOT NULL DEFAULT 'classroom';

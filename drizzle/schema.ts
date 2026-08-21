@@ -146,7 +146,7 @@ export const calendarEvents = mysqlTable("calendarEvents", {
   id: int("id").autoincrement().primaryKey(),
   classroomId: int("classroomId"),
   authorUserId: int("authorUserId").notNull(),
-  visibility: mysqlEnum("visibility", ["classroom", "global"]).default("classroom").notNull(),
+  visibility: mysqlEnum("visibility", ["personal", "classroom", "global"]).default("classroom").notNull(),
   title: varchar("title", { length: 160 }).notNull(),
   startsAt: timestamp("startsAt").notNull(),
   endsAt: timestamp("endsAt"),
