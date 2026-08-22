@@ -256,6 +256,38 @@ export async function listClassroomMembers(userId: number) {
   return db.select(fields).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(and(eq(studentProfiles.classroomId, manager.profile.classroomId), eq(studentProfiles.classroomRole, "student")));
 }
 
+export async function getClassroomMemberDetail(actorUserId: number, profileId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const target = (await db.select({ profile: studentProfiles, classroom: classrooms }).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(eq(studentProfiles.id, profileId)).limit(1))[0];
+  if (!target || target.profile.classroomRole !== "student") throw new Error("MEMBER_NOT_FOUND");
+  const account = (await db.select({ role: users.role }).from(users).where(eq(users.id, actorUserId)).limit(1))[0];
+  if (account?.role !== "admin") {
+    const manager = await requireClassroomManager(actorUserId);
+    if (manager.profile.classroomId !== target.profile.classroomId) throw new Error("MEMBER_DETAIL_FORBIDDEN");
+  }
+  const [summary, dashboard, monster, sets, recentAnswers, recentFocusSessions, revivalHistory] = await Promise.all([
+    getLearningSummary(target.profile.userId),
+    getLearningDashboard(target.profile.userId),
+    getMonsterDashboard(target.profile.userId),
+    listSavedStudySets(target.profile.userId),
+    db.select({ id: studyRecords.id, mode: studyRecords.mode, isCorrect: studyRecords.isCorrect, answeredAt: studyRecords.answeredAt }).from(studyRecords).where(eq(studyRecords.userId, target.profile.userId)).orderBy(desc(studyRecords.answeredAt), desc(studyRecords.id)).limit(8),
+    db.select({ completedAt: focusSessions.completedAt, focusSeconds: focusSessions.focusSeconds }).from(focusSessions).where(eq(focusSessions.userId, target.profile.userId)).orderBy(desc(focusSessions.completedAt)).limit(5),
+    db.select({ dateKey: revivalDays.dateKey, usedAt: revivalDays.usedAt }).from(revivalDays).where(eq(revivalDays.userId, target.profile.userId)).orderBy(desc(revivalDays.usedAt)).limit(10),
+  ]);
+  return {
+    profile: { id: target.profile.id, displayName: target.profile.displayName, classroomName: target.classroom.name, classroomCode: target.classroom.code, joinedAt: target.profile.createdAt, revivalTickets: target.profile.revivalTickets },
+    learning: summary,
+    wordbooks: dashboard.wordbooks,
+    savedSets: sets.map(set => ({ id: set.id, label: set.label, wordbookTitle: set.wordbookTitle, subject: set.subject, wordCount: set.words.length, updatedAt: set.updatedAt })),
+    reviewWordCount: dashboard.reviewWords.length,
+    recentAnswers,
+    recentFocusSessions,
+    revivalHistory,
+    monster: { stage: monster.active.progression.stage, eggNumber: monster.active.eggNumber, totalFocusSeconds: monster.totalFocusSeconds, eggCount: monster.eggs.length, historyCount: monster.history.length },
+  };
+}
+
 export async function requireGlobalAdmin(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");

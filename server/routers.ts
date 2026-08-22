@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
+import { addWordToWordbook, authenticateWithPin, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
 import { deleteSavedStudySet, getCalendarDashboard, listSavedStudySets, resetRevivalTickets, saveStudySet, updateOwnDisplayName, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -13,6 +13,8 @@ function toUserMessage(error: unknown): never {
   if (code === "WORD_BOOK_FORBIDDEN") throw new TRPCError({ code: "FORBIDDEN", message: "この単語帳を編集する権限がありません。" });
   if (code === "WORD_BOOK_NOT_FOUND" || code === "ANNOUNCEMENT_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "指定された情報が見つかりません。" });
   if (code === "CLASSROOM_MANAGER_REQUIRED") throw new TRPCError({ code: "FORBIDDEN", message: "この操作は先生または教室管理者のみが実行できます。" });
+  if (code === "MEMBER_DETAIL_FORBIDDEN") throw new TRPCError({ code: "FORBIDDEN", message: "この利用者の詳細を閲覧する権限がありません。" });
+  if (code === "MEMBER_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "対象の利用者が見つかりません。" });
   if (code === "GLOBAL_MANAGER_REQUIRED") throw new TRPCError({ code: "FORBIDDEN", message: "全体公開は全体管理者のみが実行できます。" });
   if (code === "PIN_RATE_LIMITED") throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "ログイン試行が多すぎます。15分ほど待ってから再試行してください。" });
   if (code === "INVALID_PIN_LOGIN") throw new TRPCError({ code: "UNAUTHORIZED", message: "PINまたは教室コードが正しくありません。" });
@@ -228,6 +230,9 @@ export const appRouter = router({
     members: router({
       list: protectedProcedure.query(async ({ ctx }) => {
         try { return await listClassroomMembers(ctx.user.id); } catch (error) { return toUserMessage(error); }
+      }),
+      detail: protectedProcedure.input(z.object({ profileId: z.number().int().positive() })).query(async ({ ctx, input }) => {
+        try { return await getClassroomMemberDetail(ctx.user.id, input.profileId); } catch (error) { return toUserMessage(error); }
       }),
       createPinAccount: protectedProcedure.input(z.object({ classroomId: z.number().int().positive(), displayName: z.string().trim().min(1).max(80), pin: z.string().regex(/^\d{4}$/), classroomRole: z.enum(["student", "teacher", "owner"]).optional() })).mutation(async ({ ctx, input }) => {
         try { return await createPinAccount(ctx.user.id, input); } catch (error) { return toUserMessage(error); }

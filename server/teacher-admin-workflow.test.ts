@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
-import { classrooms, pinSessions, studentProfiles, teacherAdminSessions, users } from "../drizzle/schema";
+import { classrooms, monsterEggs, monsterMissionClaims, monsterProfiles, pinSessions, studentProfiles, teacherAdminSessions, users } from "../drizzle/schema";
 import { appRouter } from "./routers";
 import { createContext, type TrpcContext } from "./_core/context";
 import { createClassroom, createPinAccount, getDb, getOrCreateSiteAdmin } from "./db";
@@ -23,7 +23,12 @@ afterAll(async () => {
     await db.delete(classrooms).where(inArray(classrooms.id, classroomIds));
   }
   const userIds = [...createdUserIds];
-  if (userIds.length) await db.delete(users).where(and(inArray(users.id, userIds), eq(users.role, "user")));
+  if (userIds.length) {
+    await db.delete(monsterMissionClaims).where(inArray(monsterMissionClaims.userId, userIds));
+    await db.delete(monsterEggs).where(inArray(monsterEggs.userId, userIds));
+    await db.delete(monsterProfiles).where(inArray(monsterProfiles.userId, userIds));
+    await db.delete(users).where(and(inArray(users.id, userIds), eq(users.role, "user")));
+  }
 });
 
 function createMockContext(): { ctx: TrpcContext; cookies: Array<{ name: string; value: string }> } {
@@ -43,8 +48,10 @@ describe("先生IDによる教室限定管理", () => {
     const admin = await getOrCreateSiteAdmin();
     const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
     const teacherId = Number(`${Date.now()}`.slice(-8));
-    const ownRoom = await createClassroom(admin.id, { code: `TEACHER-${suffix}`.slice(0, 32), name: `先生管理教室 ${suffix}`, teacherUserId: teacherId });
-    const otherRoom = await createClassroom(admin.id, { code: `OTHER-${suffix}`.slice(0, 32), name: `別教室 ${suffix}`, teacherUserId: teacherId + 1 });
+    const ownRoomCode = `TEACHER-${suffix}`.slice(0, 32);
+    const otherRoomCode = `OTHER-${suffix}`.slice(0, 32);
+    const ownRoom = await createClassroom(admin.id, { code: ownRoomCode, name: `先生管理教室 ${suffix}`, teacherUserId: teacherId });
+    const otherRoom = await createClassroom(admin.id, { code: otherRoomCode, name: `別教室 ${suffix}`, teacherUserId: teacherId + 1 });
     createdClassroomIds.add(ownRoom.id); createdClassroomIds.add(otherRoom.id);
     const ownStudent = await createPinAccount(admin.id, { classroomId: ownRoom.id, displayName: "担当教室の学習者", pin: "1234" });
     const otherStudent = await createPinAccount(admin.id, { classroomId: otherRoom.id, displayName: "別教室の学習者", pin: "5678" });
@@ -63,6 +70,13 @@ describe("先生IDによる教室限定管理", () => {
     await expect(teacherCaller.teacherAdmin.me()).resolves.toMatchObject({ teacher: { classroomId: ownRoom.id } });
     await expect(teacherCaller.classroom.members.list()).resolves.toMatchObject([{ displayName: "担当教室の学習者", classroomId: ownRoom.id }]);
     await expect(teacherCaller.management.insights()).resolves.toMatchObject({ memberCount: 1 });
+    if (!ownStudent.profileId || !otherStudent.profileId) throw new Error("学習者プロフィールを作成できませんでした。");
+    await expect(teacherCaller.classroom.members.detail({ profileId: ownStudent.profileId })).resolves.toMatchObject({
+      profile: { displayName: "担当教室の学習者", classroomCode: ownRoomCode },
+      learning: { totalFocusSeconds: 0, records: 0 },
+      monster: { stage: 1 },
+    });
+    await expect(teacherCaller.classroom.members.detail({ profileId: otherStudent.profileId })).rejects.toMatchObject({ code: "FORBIDDEN" });
 
     await teacherCaller.teacherAdmin.logout();
     const loggedOut = await createContext({ req: request, res: response });
