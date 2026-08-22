@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 const hooks = vi.hoisted(() => ({
   create: vi.fn().mockResolvedValue({ id: 1 }),
@@ -15,7 +15,7 @@ vi.mock("@/lib/trpc", () => ({
     useUtils: () => ({ studySets: { list: { invalidate: hooks.invalidate } }, wordbooks: { list: { invalidate: hooks.invalidate } } }),
     wordbooks: { list: { useQuery: () => ({ data: [{ id: 10, title: "英語第1章", words: [{ id: 101, front: "alpha", back: "最初", reading: null }, { id: 102, front: "beta", back: "次", reading: null }] }] }) } },
     studySets: {
-      list: { useQuery: () => ({ data: [{ id: 1, label: "英語第1章 第1〜2語", subject: "english", words: [{ id: 101, front: "alpha", back: "最初", reading: null }] }] }) },
+      list: { useQuery: () => ({ data: [{ id: 1, label: "英語第1章 第1〜20語", subject: "english", words: Array.from({ length: 20 }, (_, index) => ({ id: 101 + index, front: index === 0 ? "alpha" : `word-${index + 1}`, back: index === 0 ? "最初" : `意味${index + 1}`, reading: null })) }] }) },
       create: { useMutation: () => ({ mutateAsync: hooks.create }) },
       delete: { useMutation: () => ({ mutateAsync: hooks.remove }) },
     },
@@ -41,7 +41,7 @@ describe("保存学習セット方式の単語カード", () => {
   });
   it("保存済みセットをタップすると練習を開始できる", () => {
     render(<CardsWorkspace books={books} />);
-    fireEvent.click(screen.getByText("英語第1章 第1〜2語"));
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
     expect(screen.getByText("練習の設定")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
@@ -50,6 +50,23 @@ describe("保存学習セット方式の単語カード", () => {
   it("先生配信テストを開始できる", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText(/配信教材/));
+    expect(screen.getByText("テストの設定")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /この設定でテストを始める/ }));
     expect(screen.getByText("三番目")).toBeTruthy();
+  });
+  it("テストでは出題数に応じた制限時間を表示し、時間切れ後に未回答から再開できる", () => {
+    vi.useFakeTimers();
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /テスト/ }));
+    expect(screen.getByText("10問")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "20問" }));
+    expect(screen.getByText("10分")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /この設定でテストを始める/ }));
+    act(() => { vi.advanceTimersByTime(10 * 60 * 1000); });
+    expect(screen.getByText("制限時間になりました")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "続きをもう一度解く" }));
+    expect(screen.getByText(/テスト 1 \/ 20/)).toBeTruthy();
+    vi.useRealTimers();
   });
 });
