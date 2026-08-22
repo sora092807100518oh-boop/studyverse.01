@@ -146,8 +146,8 @@ describe("ホーム通知UI", () => {
 });
 
 describe("教室教材の編集制御UI", () => {
-  it("利用者が教室教材を開くと編集不可の理由を表示し、編集操作を出さない", () => {
-    render(<BookDetail book={{ id: "1", remoteId: 1, name: "教室の英単語", count: 1, scope: "教室公開", tone: "from-cyan-400 to-blue-500", canEdit: false, words: [{ id: 11, front: "observe", back: "観察する" }] }} subject="英単語" setBooks={vi.fn()} onPractice={vi.fn()} onClose={vi.fn()} />);
+  it("管理セッション由来の編集可フラグがあっても、利用者画面では教室教材を編集できない", () => {
+    render(<BookDetail book={{ id: "1", remoteId: 1, name: "教室の英単語", count: 1, scope: "教室公開", tone: "from-cyan-400 to-blue-500", canEdit: true, words: [{ id: 11, front: "observe", back: "観察する" }] }} subject="英単語" setBooks={vi.fn()} onPractice={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByText(/管理画面で作成された教室教材/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "単語を編集" })).toBeNull();
     expect(screen.queryByRole("button", { name: "単語を削除" })).toBeNull();
