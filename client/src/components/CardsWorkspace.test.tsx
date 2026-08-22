@@ -20,7 +20,7 @@ vi.mock("@/lib/trpc", () => ({
       delete: { useMutation: () => ({ mutateAsync: hooks.remove }) },
     },
     classroom: { recommendedTests: { list: { useQuery: () => ({ data: [{ id: 5, wordbookTitle: "配信教材", subject: "english", rangeStart: 2, rangeEnd: 2, questionCount: 1, words: [{ id: 202, front: "gamma", back: "三番目", reading: null }] }] }) } } },
-    learning: { review: { useQuery: () => ({ data: [], refetch: hooks.reviewRefetch }) }, recordAnswer: { useMutation: () => ({ mutateAsync: hooks.recordAnswer }) } },
+    learning: { review: { useQuery: () => ({ data: [], refetch: hooks.reviewRefetch }) }, dashboard: { useQuery: () => ({ data: { mistakeCounts: [] }, refetch: hooks.reviewRefetch }) }, recordAnswer: { useMutation: () => ({ mutateAsync: hooks.recordAnswer }) } },
   },
 }));
 
@@ -43,11 +43,13 @@ describe("保存学習セット方式の単語カード", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜2語"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
-    expect(screen.getByText("alpha")).toBeTruthy();
+    expect(screen.getByText("練習の設定")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    expect(screen.getByText("最初")).toBeTruthy();
   });
   it("先生配信テストを開始できる", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText(/配信教材/));
-    expect(screen.getByText("gamma")).toBeTruthy();
+    expect(screen.getByText("三番目")).toBeTruthy();
   });
 });

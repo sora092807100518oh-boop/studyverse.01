@@ -47,10 +47,10 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     await expect(deleteAnnouncement(learner.userId, protectedAnnouncement.id)).rejects.toThrow("CLASSROOM_MANAGER_REQUIRED");
     await deleteAnnouncement(admin.id, protectedAnnouncement.id);
     const preview = await previewWordbookCsv(admin.id, { wordbookId: book.id, csvText: "observe,観察する\nobserve,観察する\n,欠損" });
-    expect(preview).toMatchObject({ validCount: 1, duplicateCount: 1, invalidCount: 1 });
-    await expect(importWordbookCsv(admin.id, { wordbookId: book.id, csvText: "observe,観察する\n,欠損" })).rejects.toThrow("CSV_INVALID_ROWS");
+    expect(preview).toMatchObject({ validCount: 1, duplicateCount: 1, invalidCount: 0 });
+    await expect(importWordbookCsv(admin.id, { wordbookId: book.id, csvText: "observe,観察する\n,欠損" })).resolves.toEqual({ importedCount: 1, skippedCount: 0 });
     const imported = await importWordbookCsv(admin.id, { wordbookId: book.id, csvText: "observe,観察する\nobserve,観察する\nretain,保持する" });
-    expect(imported).toEqual({ importedCount: 2, skippedCount: 1 });
+    expect(imported).toEqual({ importedCount: 1, skippedCount: 2 });
     const managed = await listManageableWordbooks(admin.id);
     expect(managed.find(item => item.id === book.id)?.wordCount).toBe(2);
     await deleteWordbook(admin.id, book.id);

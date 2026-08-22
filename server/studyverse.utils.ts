@@ -14,7 +14,7 @@ export function previewVocabularyRows(text: string, maxRows = 3000): CsvPreviewR
   return lines.reduce<CsvPreviewRow[]>((rows, { line, lineNumber }) => {
     const [front = "", back = ""] = line.split(line.includes("\t") ? "\t" : ",").map(cell => cell.trim());
     if (isVocabularyHeader(front, back)) return rows;
-    if (!front || !back) { rows.push({ line: lineNumber, front, back, valid: false, reason: "表面と裏面の両方が必要です。" }); return rows; }
+    if (!front || !back) return rows;
     if (front.length > 500 || back.length > 500) { rows.push({ line: lineNumber, front, back, valid: false, reason: "1項目は500文字以内にしてください。" }); return rows; }
     rows.push({ line: lineNumber, front, back, valid: true });
     return rows;

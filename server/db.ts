@@ -679,7 +679,8 @@ export async function getLearningDashboard(userId: number) {
     return word ? { ...word, missedAt: latest.answeredAt } : null;
   }).filter((word): word is NonNullable<typeof word> => Boolean(word)).slice(0, 5);
   const unstartedSets = sets.filter(set => set.words.length > 0 && set.words.every(word => !latestByWord.has(word.id))).slice(0, 3).map(set => ({ id: set.id, label: set.label, wordbookId: set.wordbookId, wordbookTitle: set.wordbookTitle, wordCount: set.words.length }));
-  return { wordbooks, reviewWords, unstartedSets };
+  const mistakeCounts = Array.from(attemptsByWord.entries()).map(([wordId, attempts]) => ({ wordId, mistakeCount: attempts.filter(attempt => !attempt.isCorrect).length })).filter(item => item.mistakeCount > 0);
+  return { wordbooks, reviewWords, unstartedSets, mistakeCounts };
 }
 
 export async function recordFocusSession(userId: number, input: { startedAt: Date; completedAt: Date; focusSeconds: number }) {

@@ -10,9 +10,9 @@ describe("previewVocabularyRows", () => {
     ]);
   });
 
-  it("不完全な行には利用者向けの理由を付ける", () => {
-    const [row] = previewVocabularyRows("observe,");
-    expect(row).toMatchObject({ valid: false, reason: "表面と裏面の両方が必要です。" });
+  it("空欄を含む行は無視し、有効な行だけを返す", () => {
+    const rows = previewVocabularyRows("observe,\n,保持する\nretain,保持する");
+    expect(rows).toEqual([{ line: 3, front: "retain", back: "保持する", valid: true }]);
   });
 
   it("単語・意味のヘッダー行を自動で除外する", () => {
