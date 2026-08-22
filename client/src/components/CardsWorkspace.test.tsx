@@ -59,8 +59,8 @@ describe("保存学習セット方式の単語カード", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
     fireEvent.click(screen.getByRole("button", { name: /テスト/ }));
-    expect(screen.getByText("10問")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "20問" }));
+    expect(screen.getByLabelText("出題数")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("出題数"), { target: { value: "20" } });
     expect(screen.getByText("10分")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /この設定でテストを始める/ }));
     act(() => { vi.advanceTimersByTime(10 * 60 * 1000); });
@@ -68,5 +68,17 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: "続きをもう一度解く" }));
     expect(screen.getByText(/テスト 1 \/ 20/)).toBeTruthy();
     vi.useRealTimers();
+  });
+  it("結果画面に誤答一覧を表示し、誤答だけを再テストできる", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText(/配信教材/));
+    fireEvent.click(screen.getByRole("button", { name: /この設定でテストを始める/ }));
+    fireEvent.change(screen.getByPlaceholderText("答えを入力"), { target: { value: "wrong" } });
+    fireEvent.click(screen.getByRole("button", { name: "答えを確認する" }));
+    fireEvent.click(screen.getByRole("button", { name: "復習に入れる" }));
+    expect(screen.getByText("誤答一覧（1問）")).toBeTruthy();
+    expect(screen.getByText("答え：gamma")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "誤答だけをもう一度テストする" }));
+    expect(screen.getByText(/テスト 1 \/ 1/)).toBeTruthy();
   });
 });
