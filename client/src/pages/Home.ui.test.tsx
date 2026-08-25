@@ -45,7 +45,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { BookDetail, CardsView, Header, isLearnerOnlyBook } from "./Home";
+import { BookDetail, CardsView, Header, TimerStrip, isLearnerOnlyBook } from "./Home";
 
 const books = {
   英単語: [{
@@ -84,6 +84,19 @@ afterEach(() => {
   hooks.invalidate.mockClear();
   hooks.announcements = [];
   window.localStorage.clear();
+});
+
+describe("上部タイマー表示", () => {
+  it("作動中は残り時間とONを表示し、停止中はOFFを表示する", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(<TimerStrip running elapsed={60} onToggle={onToggle} />);
+    expect(screen.getByLabelText("残り時間").textContent).toBe("24:00");
+    expect(screen.getByRole("button", { name: "タイマーをオフにする" }).textContent).toBe("ON");
+    fireEvent.click(screen.getByRole("button", { name: "タイマーをオフにする" }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    rerender(<TimerStrip running={false} elapsed={60} onToggle={onToggle} />);
+    expect(screen.getByRole("button", { name: "タイマーをオンにする" }).textContent).toBe("OFF");
+  });
 });
 
 describe("カード回答の記録UI", () => {
