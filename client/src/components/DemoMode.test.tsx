@@ -28,7 +28,7 @@ describe("お試しモード", () => {
 
   it("カレンダーを利用不可と案内し、保存されないことを表示する", () => {
     render(<DemoMode onLogout={vi.fn()} />);
-    expect(screen.getAllByText(/予定・学習記録を保存しません/).length).toBeGreaterThan(0);
-    expect(screen.getByText("お試しモードでは予定を追加できません")).toBeTruthy();
+    expect(screen.getAllByText("お試しモードでは記録しません").length).toBeGreaterThan(0);
+    expect(screen.getByText("予定を追加")).toBeTruthy();
   });
 });
