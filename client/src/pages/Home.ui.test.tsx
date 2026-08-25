@@ -101,8 +101,11 @@ describe("上部タイマー表示", () => {
   it("任意の集中時間と上部表示設定を変更できる", () => {
     const onDurationChange = vi.fn(); const onShowTopTimerChange = vi.fn();
     render(<TimerCard running={false} elapsed={0} durationMinutes={25} showTopTimer onToggle={vi.fn()} onReset={vi.fn()} onDurationChange={onDurationChange} onShowTopTimerChange={onShowTopTimerChange} />);
+    expect(screen.queryByLabelText("集中時間（分）")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "タイマー時間：25分" }));
     fireEvent.change(screen.getByLabelText("集中時間（分）"), { target: { value: "50" } });
     expect(onDurationChange).toHaveBeenCalledWith(50);
+    expect(screen.queryByLabelText("集中時間（分）")).toBeNull();
     fireEvent.click(screen.getByRole("checkbox"));
     expect(onShowTopTimerChange).toHaveBeenCalledWith(false);
   });
