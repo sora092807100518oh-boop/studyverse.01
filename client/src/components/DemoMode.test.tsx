@@ -3,6 +3,13 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DemoMode } from "./DemoMode";
 
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.defineProperty(globalThis, "ResizeObserver", { value: ResizeObserverStub, writable: true });
+
 describe("お試しモード", () => {
   it("固定の英単語帳・漢字単語帳とカードを表示し、管理画面バーを表示しない", () => {
     render(<DemoMode onLogout={vi.fn()} />);
@@ -21,7 +28,7 @@ describe("お試しモード", () => {
 
   it("カレンダーを利用不可と案内し、保存されないことを表示する", () => {
     render(<DemoMode onLogout={vi.fn()} />);
-    expect(screen.getAllByText(/カレンダー・学習状況・予定は保存されません/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/予定・学習記録を保存しません/).length).toBeGreaterThan(0);
     expect(screen.getByText("お試しモードでは記録しません")).toBeTruthy();
   });
 });
