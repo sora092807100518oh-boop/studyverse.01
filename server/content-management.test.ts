@@ -51,6 +51,8 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     await expect(importWordbookCsv(admin.id, { wordbookId: book.id, csvText: "observe,観察する\n,欠損" })).resolves.toEqual({ importedCount: 1, skippedCount: 0 });
     const imported = await importWordbookCsv(admin.id, { wordbookId: book.id, csvText: "observe,観察する\nobserve,観察する\nretain,保持する" });
     expect(imported).toEqual({ importedCount: 1, skippedCount: 2 });
+    const learnerPrivateBook = await createWordbook(learner.userId, { title: "学習者の自作教材", subject: "english", visibility: "private" });
+    expect((await listManageableWordbooks(admin.id)).some(item => item.id === learnerPrivateBook.id)).toBe(false);
     const managed = await listManageableWordbooks(admin.id);
     expect(managed.find(item => item.id === book.id)?.wordCount).toBe(2);
     await deleteWordbook(admin.id, book.id);

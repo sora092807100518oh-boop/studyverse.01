@@ -17,11 +17,15 @@ vi.mock("@/lib/trpc", () => ({
         useMutation: () => ({ mutateAsync: hooks.mutateAsync }),
       },
     },
-    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate } } }),
+    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } } }),
     wordbooks: {
       addWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
       updateWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
       deleteWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
+      delete: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
+      previewCsv: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
+      importCsv: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
+      downloadCsv: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
     },
     classroom: {
       announcements: {
@@ -161,5 +165,24 @@ describe("教室教材の編集制御UI", () => {
     expect(screen.queryByRole("button", { name: "単語を削除" })).toBeNull();
     expect(screen.queryByRole("button", { name: "単語を追加" })).toBeNull();
     expect(screen.getByRole("button", { name: /この単語帳で練習する/ })).toBeTruthy();
+  });
+});
+
+describe("自作単語帳の削除UI", () => {
+  it("自分の教材は詳細画面から削除でき、確認ダイアログを経てAPIを呼び出す", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const onClose = vi.fn();
+    render(<BookDetail book={{ id: "1", remoteId: 1, name: "自作の英単語", count: 1, scope: "自分の教材", tone: "from-cyan-400 to-blue-500", canEdit: true, words: [{ id: 11, front: "observe", back: "観察する" }] }} subject="英単語" setBooks={vi.fn()} onPractice={vi.fn()} onClose={onClose} />);
+    
+    const deleteButton = screen.getByRole("button", { name: "単語帳を削除" });
+    fireEvent.click(deleteButton);
+    
+    expect(confirmSpy).toHaveBeenCalledWith("「自作の英単語」を削除しますか？");
+    expect(hooks.mutateAsync).toHaveBeenCalledWith({ wordbookId: 1 });
+    await waitFor(() => expect(hooks.invalidate).toHaveBeenCalled());
+    expect(onClose).toHaveBeenCalled();
+    expect(hooks.toastSuccess).toHaveBeenCalledWith("単語帳を削除しました。");
+    
+    confirmSpy.mockRestore();
   });
 });

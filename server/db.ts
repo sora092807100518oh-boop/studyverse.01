@@ -636,7 +636,9 @@ export async function listManageableWordbooks(userId: number) {
   const profile = await getProfile(userId);
   const canManage = account[0]?.role === "admin" || profile?.profile.classroomRole === "teacher" || profile?.profile.classroomRole === "owner";
   if (!canManage) throw new Error(profile ? "CLASSROOM_MANAGER_REQUIRED" : "CLASSROOM_REQUIRED");
-  const where = account[0]?.role === "admin" ? undefined : or(eq(wordbooks.classroomId, profile!.profile.classroomId), eq(wordbooks.ownerUserId, userId));
+  const where = account[0]?.role === "admin"
+    ? or(eq(wordbooks.visibility, "classroom"), eq(wordbooks.visibility, "global"))
+    : and(or(eq(wordbooks.visibility, "classroom"), eq(wordbooks.visibility, "global")), eq(wordbooks.classroomId, profile!.profile.classroomId));
   const query = db.select().from(wordbooks).orderBy(desc(wordbooks.updatedAt));
   const rows = where ? await query.where(where) : await query;
   return Promise.all(rows.map(async book => {
