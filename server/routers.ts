@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
+import { addWordToWordbook, authenticateWithPin, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
 import { deleteSavedStudySet, getCalendarDashboard, listSavedStudySets, resetRevivalTickets, saveStudySet, updateOwnDisplayName, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -178,7 +178,7 @@ export const appRouter = router({
   }),
   wordbooks: router({
     list: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]).optional() }).optional()).query(async ({ ctx, input }) => listVisibleWordbooks(ctx.user.id, input?.subject)),
-    create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), subject: z.enum(["english", "kanji"]), visibility: z.enum(["private", "classroom"]).default("private"), classroomId: z.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
+    create: protectedProcedure.input(z.object({ title: z.string().trim().min(1).max(160), subject: z.enum(["english", "kanji"]), visibility: z.enum(["private", "classroom", "global"]).default("private"), classroomId: z.number().int().positive().optional() })).mutation(async ({ ctx, input }) => {
       try { return await createWordbook(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
     }),
     addWord: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), front: z.string().trim().min(1).max(500), back: z.string().trim().min(1).max(500), reading: z.string().trim().max(500).optional(), source: z.enum(["manual", "csv", "admin"]).optional() })).mutation(async ({ ctx, input }) => {
@@ -225,6 +225,9 @@ export const appRouter = router({
       update: protectedProcedure.input(z.object({ classroomId: z.number().int().positive(), name: z.string().trim().min(1).max(120).optional(), teacherUserId: z.number().int().positive().nullable().optional() })).mutation(async ({ ctx, input }) => {
         const { classroomId, ...update } = input;
         try { await updateClassroom(ctx.user.id, classroomId, update); return { success: true }; } catch (error) { return toUserMessage(error); }
+      }),
+      delete: protectedProcedure.input(z.object({ classroomId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        try { return await deleteClassroom(ctx.user.id, input.classroomId); } catch (error) { return toUserMessage(error); }
       }),
     }),
     members: router({
@@ -280,7 +283,7 @@ export const appRouter = router({
       manage: protectedProcedure.query(async ({ ctx }) => {
         try { return await listManageableRecommendedTests(ctx.user.id); } catch (error) { return toUserMessage(error); }
       }),
-      create: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), rangeStart: z.number().int().positive(), rangeEnd: z.number().int().positive(), questionCount: z.number().int().positive(), classroomId: z.number().int().positive().optional(), availableFrom: z.date().optional(), availableUntil: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      create: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), rangeStart: z.number().int().positive(), rangeEnd: z.number().int().positive(), questionCount: z.number().int().positive(), classroomId: z.number().int().positive().optional(), allClassrooms: z.boolean().optional(), availableFrom: z.date().optional(), availableUntil: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
         try { return await createRecommendedTest(ctx.user.id, { ...input, availableUntil: input.availableUntil ?? undefined }); } catch (error) { return toUserMessage(error); }
       }),
       delete: protectedProcedure.input(z.object({ recommendedTestId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {

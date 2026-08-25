@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -327,6 +327,52 @@ export async function updateClassroom(userId: number, classroomId: number, input
   await writeActivity({ actorUserId: userId, classroomId, category: "classroom", action: "classroom.updated", details: input.name ?? "担当先生を更新" });
 }
 
+export async function deleteClassroom(userId: number, classroomId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const actor = (await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1))[0];
+  if (actor?.role !== "admin") throw new Error("GLOBAL_MANAGER_REQUIRED");
+  const classroom = (await db.select().from(classrooms).where(eq(classrooms.id, classroomId)).limit(1))[0];
+  if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
+
+  const profiles = await db.select({ userId: studentProfiles.userId }).from(studentProfiles).where(eq(studentProfiles.classroomId, classroomId));
+  const memberUserIds = profiles.map(profile => profile.userId);
+  const books = await db.select({ id: wordbooks.id }).from(wordbooks).where(eq(wordbooks.classroomId, classroomId));
+  const wordbookIds = books.map(book => book.id);
+
+  await db.transaction(async tx => {
+    if (wordbookIds.length) {
+      await tx.delete(savedStudySets).where(inArray(savedStudySets.wordbookId, wordbookIds));
+      await tx.delete(vocabularyWords).where(inArray(vocabularyWords.wordbookId, wordbookIds));
+      await tx.delete(wordbooks).where(inArray(wordbooks.id, wordbookIds));
+    }
+    await tx.delete(recommendedTests).where(eq(recommendedTests.classroomId, classroomId));
+    await tx.delete(announcements).where(eq(announcements.classroomId, classroomId));
+    await tx.delete(calendarEvents).where(eq(calendarEvents.classroomId, classroomId));
+    await tx.delete(studyRecords).where(eq(studyRecords.classroomId, classroomId));
+    await tx.delete(focusSessions).where(eq(focusSessions.classroomId, classroomId));
+    await tx.delete(journalEntries).where(eq(journalEntries.classroomId, classroomId));
+    await tx.delete(teacherAdminSessions).where(eq(teacherAdminSessions.classroomId, classroomId));
+    await tx.delete(pinSessions).where(eq(pinSessions.classroomId, classroomId));
+    await tx.delete(activityLogs).where(eq(activityLogs.classroomId, classroomId));
+    if (memberUserIds.length) {
+      await tx.delete(savedStudySets).where(inArray(savedStudySets.userId, memberUserIds));
+      await tx.delete(revivalDays).where(inArray(revivalDays.userId, memberUserIds));
+      await tx.delete(monsterMissionClaims).where(inArray(monsterMissionClaims.userId, memberUserIds));
+      await tx.delete(monsterEggs).where(inArray(monsterEggs.userId, memberUserIds));
+      await tx.delete(monsterProfiles).where(inArray(monsterProfiles.userId, memberUserIds));
+      await tx.delete(calendarEvents).where(inArray(calendarEvents.authorUserId, memberUserIds));
+      await tx.delete(journalEntries).where(inArray(journalEntries.userId, memberUserIds));
+      await tx.delete(activityLogs).where(inArray(activityLogs.actorUserId, memberUserIds));
+      await tx.delete(studentProfiles).where(eq(studentProfiles.classroomId, classroomId));
+      await tx.delete(users).where(inArray(users.id, memberUserIds));
+    }
+    await tx.delete(classrooms).where(eq(classrooms.id, classroomId));
+  });
+  await writeActivity({ actorUserId: userId, category: "classroom", action: "classroom.deleted", details: `${classroom.name}｜${classroom.code}｜利用者${memberUserIds.length}人・教材${wordbookIds.length}件` });
+  return { deletedClassroomId: classroomId, deletedMemberCount: memberUserIds.length, deletedWordbookCount: wordbookIds.length };
+}
+
 export async function listVisibleAnnouncements(userId: number) {
   const db = await getDb();
   if (!db) return [];
@@ -444,32 +490,40 @@ export async function deletePersonalCalendarEvent(userId: number, calendarEventI
   await db.delete(calendarEvents).where(eq(calendarEvents.id, calendarEventId));
 }
 
-async function getRecommendedTestClassroomId(userId: number, requestedClassroomId?: number) {
+async function getRecommendedTestClassroomIds(userId: number, requestedClassroomId?: number, allClassrooms = false) {
   const scope = await getAnnouncementManagementScope(userId);
-  if (!scope.isAdmin) return scope.profile!.profile.classroomId;
-  if (requestedClassroomId) return requestedClassroomId;
+  if (!scope.isAdmin) return [scope.profile!.profile.classroomId];
+  if (allClassrooms) {
+    const db = await getDb();
+    const targets = db ? await db.select({ id: classrooms.id }).from(classrooms).orderBy(desc(classrooms.createdAt)) : [];
+    if (!targets.length) throw new Error("CLASSROOM_REQUIRED");
+    return targets.map(target => target.id);
+  }
+  if (requestedClassroomId) return [requestedClassroomId];
   const db = await getDb();
   const latest = db ? (await db.select({ id: classrooms.id }).from(classrooms).orderBy(desc(classrooms.createdAt)).limit(1))[0] : undefined;
   if (!latest) throw new Error("CLASSROOM_REQUIRED");
-  return latest.id;
+  return [latest.id];
 }
 
-export async function createRecommendedTest(userId: number, input: { wordbookId: number; rangeStart: number; rangeEnd: number; questionCount: number; classroomId?: number; availableFrom?: Date; availableUntil?: Date }) {
+export async function createRecommendedTest(userId: number, input: { wordbookId: number; rangeStart: number; rangeEnd: number; questionCount: number; classroomId?: number; allClassrooms?: boolean; availableFrom?: Date; availableUntil?: Date }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const classroomId = await getRecommendedTestClassroomId(userId, input.classroomId);
+  const classroomIds = await getRecommendedTestClassroomIds(userId, input.classroomId, input.allClassrooms);
   const scope = await getAnnouncementManagementScope(userId);
   const book = (await db.select().from(wordbooks).where(eq(wordbooks.id, input.wordbookId)).limit(1))[0];
   if (!book) throw new Error("WORD_BOOK_NOT_FOUND");
-  if (!scope.isAdmin && book.classroomId !== classroomId && book.ownerUserId !== userId) throw new Error("WORD_BOOK_FORBIDDEN");
+  if (!scope.isAdmin && book.classroomId !== classroomIds[0] && book.ownerUserId !== userId) throw new Error("WORD_BOOK_FORBIDDEN");
+  if (classroomIds.length > 1 && book.visibility !== "global") throw new Error("WORD_BOOK_FORBIDDEN");
   const words = await db.select({ id: vocabularyWords.id }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, book.id)).orderBy(vocabularyWords.id);
   if (input.rangeStart < 1 || input.rangeEnd < input.rangeStart || input.rangeEnd > words.length) throw new Error("TEST_RANGE_INVALID");
   const rangeLength = input.rangeEnd - input.rangeStart + 1;
   if (input.questionCount < 1 || input.questionCount > rangeLength) throw new Error("TEST_QUESTION_COUNT_INVALID");
   if (input.availableUntil && input.availableFrom && input.availableUntil < input.availableFrom) throw new Error("TEST_PERIOD_INVALID");
-  const result = await db.insert(recommendedTests).values({ classroomId, authorUserId: userId, wordbookId: book.id, rangeStart: input.rangeStart, rangeEnd: input.rangeEnd, questionCount: input.questionCount, availableFrom: input.availableFrom ?? new Date(Date.now() - 1_000), availableUntil: input.availableUntil ?? null }).$returningId();
-  await writeActivity({ actorUserId: userId, classroomId, category: "classroom", action: "recommendedTest.created", details: `${book.title}｜第${input.rangeStart}〜${input.rangeEnd}語` });
-  return result[0];
+  const values = classroomIds.map(classroomId => ({ classroomId, authorUserId: userId, wordbookId: book.id, rangeStart: input.rangeStart, rangeEnd: input.rangeEnd, questionCount: input.questionCount, availableFrom: input.availableFrom ?? new Date(Date.now() - 1_000), availableUntil: input.availableUntil ?? null }));
+  await db.insert(recommendedTests).values(values);
+  await Promise.all(classroomIds.map(classroomId => writeActivity({ actorUserId: userId, classroomId, category: "classroom", action: "recommendedTest.created", details: `${book.title}｜第${input.rangeStart}〜${input.rangeEnd}語` })));
+  return { targetCount: classroomIds.length };
 }
 
 async function decorateRecommendedTests(rows: Array<typeof recommendedTests.$inferSelect>) {
@@ -549,15 +603,16 @@ function normalizeVocabularyPair(front: string, back: string) {
   return `${front.normalize("NFKC").trim().toLocaleLowerCase()}\u0000${back.normalize("NFKC").trim().toLocaleLowerCase()}`;
 }
 
-export async function createWordbook(userId: number, input: { title: string; subject: "english" | "kanji"; visibility: "private" | "classroom"; classroomId?: number }) {
+export async function createWordbook(userId: number, input: { title: string; subject: "english" | "kanji"; visibility: "private" | "classroom" | "global"; classroomId?: number }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const profile = await getProfile(userId);
   const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
   const isAdmin = account[0]?.role === "admin";
   const isManager = profile?.profile.classroomRole === "teacher" || profile?.profile.classroomRole === "owner";
-  if (input.visibility === "classroom" && !isAdmin && !isManager) throw new Error(profile ? "CLASSROOM_MANAGER_REQUIRED" : "CLASSROOM_REQUIRED");
-  const classroomId = input.visibility === "classroom" ? (isAdmin ? input.classroomId : profile?.profile.classroomId) : profile?.profile.classroomId ?? null;
+  if ((input.visibility === "classroom" || input.visibility === "global") && !isAdmin && !isManager) throw new Error(profile ? "CLASSROOM_MANAGER_REQUIRED" : "CLASSROOM_REQUIRED");
+  if (input.visibility === "global" && !isAdmin) throw new Error("GLOBAL_MANAGER_REQUIRED");
+  const classroomId = input.visibility === "global" ? null : input.visibility === "classroom" ? (isAdmin ? input.classroomId : profile?.profile.classroomId) : profile?.profile.classroomId ?? null;
   if (input.visibility === "classroom" && !classroomId) throw new Error("CLASSROOM_REQUIRED");
   const inserted = await db.insert(wordbooks).values({ title: input.title, subject: input.subject, visibility: input.visibility, ownerUserId: userId, classroomId }).$returningId();
   await writeActivity({ actorUserId: userId, classroomId: classroomId ?? undefined, category: "classroom", action: "wordbook.created", details: input.title });

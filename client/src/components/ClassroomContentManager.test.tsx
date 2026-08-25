@@ -6,12 +6,13 @@ const hooks = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   invalidate: vi.fn().mockResolvedValue(undefined),
-  managedBooks: [] as Array<{ id: number; title: string; subject: "english" | "kanji"; visibility: "private" | "classroom"; classroomId: number | null; wordCount: number; words: Array<{ front: string; back: string; reading: string | null }> }>,
+  managedBooks: [] as Array<{ id: number; title: string; subject: "english" | "kanji"; visibility: "private" | "classroom" | "global"; classroomId: number | null; wordCount: number; words: Array<{ front: string; back: string; reading: string | null }> }>,
 }));
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({ wordbooks: { managed: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate } }, classroom: { announcements: { manage: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate }, history: { invalidate: hooks.invalidate } } } }),
+    siteAdmin: { me: { useQuery: () => ({ data: null, isLoading: false }) } },
     classroom: {
       rooms: { list: { useQuery: () => ({ data: [{ id: 5, name: "検証教室", code: "UI-TEST" }], isLoading: false, isError: false }) } },
       announcements: {
@@ -35,16 +36,14 @@ vi.mock("@/lib/trpc", () => ({
 vi.mock("sonner", () => ({ toast: { error: hooks.toastError, success: hooks.toastSuccess } }));
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { ClassroomContentManager } from "./ClassroomContentManager";
+import { ClassroomContentManager, resolveTarget, TargetClassroomSelect } from "./ClassroomContentManager";
 
 afterEach(() => { cleanup(); hooks.createAnnouncement.mockReset(); hooks.toastError.mockReset(); hooks.toastSuccess.mockReset(); hooks.invalidate.mockClear(); hooks.managedBooks = []; });
 
 function fillAnnouncement() {
   fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "今週のミッション" } });
   fireEvent.change(screen.getByLabelText("本文"), { target: { value: "単語カードを10問練習しましょう。" } });
-  const selects = screen.getAllByRole("combobox");
-  fireEvent.change(selects[0]!, { target: { value: "classroom" } });
-  fireEvent.change(selects[1]!, { target: { value: "5" } });
+  fireEvent.change(screen.getByLabelText("対象教室"), { target: { value: "5" } });
 }
 
 describe("お知らせ管理UI", () => {
@@ -88,5 +87,24 @@ describe("管理単語帳CSV", () => {
     fireEvent.click(screen.getByRole("button", { name: "CSVをダウンロード" }));
     expect(click).toHaveBeenCalled(); const links = document.querySelectorAll('a[href^="data:text/csv"]'); expect(links[links.length - 1]?.getAttribute("download")).toBe("英語第1章.csv"); expect(hooks.toastSuccess).toHaveBeenCalledWith("単語帳CSVをダウンロードしました。");
     click.mockRestore();
+  });
+});
+
+describe("対象教室の権限制御", () => {
+  it("全体管理ではすべての教室と個別教室を選択できる", () => {
+    const onChange = vi.fn();
+    render(<TargetClassroomSelect value="all" onChange={onChange} isSiteAdmin rooms={[{ id: 5, name: "検証教室", code: "UI-TEST" }, { id: 6, name: "別教室", code: "UI-OTHER" }]} />);
+    expect(screen.getByRole("option", { name: "すべての教室" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "検証教室｜UI-TEST" })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("対象教室"), { target: { value: "6" } });
+    expect(onChange).toHaveBeenCalledWith("6");
+  });
+
+  it("先生管理では担当教室だけが選択肢となり、すべての教室は表示しない", () => {
+    render(<TargetClassroomSelect value="5" onChange={vi.fn()} isSiteAdmin={false} rooms={[{ id: 5, name: "検証教室", code: "UI-TEST" }]} />);
+    expect(screen.getByRole("option", { name: "検証教室｜UI-TEST" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "すべての教室" })).toBeNull();
+    expect(resolveTarget("5", false)).toEqual({ allClassrooms: false, classroomId: 5 });
+    expect(resolveTarget("all", true)).toEqual({ allClassrooms: true, classroomId: undefined });
   });
 });
