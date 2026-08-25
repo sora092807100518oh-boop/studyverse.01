@@ -20,9 +20,10 @@ describe("お試しモード", () => {
     fireEvent.click(screen.getByRole("button", { name: "漢字" }));
     expect(screen.getByText("お試し漢字単語帳")).toBeTruthy();
     expect(screen.getAllByText("学習専用")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "英単語" }));
-    fireEvent.click(screen.getByText("お試し英単語帳"));
-    fireEvent.click(screen.getByRole("button", { name: /この単語帳で練習する/ }));
+    fireEvent.click(screen.getByRole("button", { name: "単語カード" }));
+    fireEvent.click(screen.getByText("お試し英単語帳 基礎セット"));
+    fireEvent.click(screen.getByRole("button", { name: "練習" }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("右へスワイプで覚えた、左へスワイプで次へ")).toBeTruthy();
   });
 
