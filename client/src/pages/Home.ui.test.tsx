@@ -45,7 +45,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { BookDetail, CardsView, Header, TimerStrip, isLearnerOnlyBook } from "./Home";
+import { BookDetail, CardsView, Header, TimerCard, TimerStrip, isLearnerOnlyBook } from "./Home";
 
 const books = {
   英単語: [{
@@ -89,13 +89,22 @@ afterEach(() => {
 describe("上部タイマー表示", () => {
   it("作動中は残り時間とONを表示し、停止中はOFFを表示する", () => {
     const onToggle = vi.fn();
-    const { rerender } = render(<TimerStrip running elapsed={60} onToggle={onToggle} />);
+    const { rerender } = render(<TimerStrip running elapsed={60} durationMinutes={25} onToggle={onToggle} />);
     expect(screen.getByLabelText("残り時間").textContent).toBe("24:00");
     expect(screen.getByRole("button", { name: "タイマーをオフにする" }).textContent).toBe("ON");
     fireEvent.click(screen.getByRole("button", { name: "タイマーをオフにする" }));
     expect(onToggle).toHaveBeenCalledTimes(1);
-    rerender(<TimerStrip running={false} elapsed={60} onToggle={onToggle} />);
+    rerender(<TimerStrip running={false} elapsed={60} durationMinutes={25} onToggle={onToggle} />);
     expect(screen.getByRole("button", { name: "タイマーをオンにする" }).textContent).toBe("OFF");
+  });
+
+  it("任意の集中時間と上部表示設定を変更できる", () => {
+    const onDurationChange = vi.fn(); const onShowTopTimerChange = vi.fn();
+    render(<TimerCard running={false} elapsed={0} durationMinutes={25} showTopTimer onToggle={vi.fn()} onReset={vi.fn()} onDurationChange={onDurationChange} onShowTopTimerChange={onShowTopTimerChange} />);
+    fireEvent.change(screen.getByLabelText("集中時間（分）"), { target: { value: "50" } });
+    expect(onDurationChange).toHaveBeenCalledWith(50);
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(onShowTopTimerChange).toHaveBeenCalledWith(false);
   });
 });
 

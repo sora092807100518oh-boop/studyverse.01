@@ -8,10 +8,10 @@ vi.mock("@/lib/trpc", () => ({
 }));
 
 vi.mock("@/components/ui/chart", () => ({ ChartContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, ChartTooltip: () => null, ChartTooltipContent: () => null }));
-vi.mock("recharts", () => ({ Bar: () => null, CartesianGrid: () => null, ComposedChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, Legend: () => null, Line: () => null, XAxis: () => null, YAxis: () => null }));
+vi.mock("recharts", () => ({ Bar: ({ shape }: { shape?: React.ReactElement<Record<string, unknown>> }) => shape ? React.cloneElement(shape, { x: 0, y: 0, width: 16, height: 16, payload: { label: "4/1", focusMinutes: 12, accuracy: 80 } }) : null, CartesianGrid: () => null, ComposedChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, Legend: () => null, Line: ({ dot }: { dot?: React.ReactElement<Record<string, unknown>> }) => dot ? React.cloneElement(dot, { cx: 10, cy: 10, payload: { label: "4/1", focusMinutes: 12, accuracy: 80 } }) : null, XAxis: () => null, YAxis: () => null }));
 
 import { fireEvent, render, screen } from "@testing-library/react";
-import { LearningTrendChart } from "./LearningTrendChart";
+import { Graph, LearningTrendChart } from "./LearningTrendChart";
 
 describe("期間別学習グラフの取得失敗UI", () => {
   it("取得失敗時に可視エラーと再試行ボタンを表示する", () => {
@@ -19,5 +19,16 @@ describe("期間別学習グラフの取得失敗UI", () => {
     expect(screen.getByText("学習グラフを取得できませんでした。")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "再試行" }));
     expect(hooks.refetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("学習推移の系列別詳細", () => {
+  it("棒をタップすると学習時間のみ、折れ線をタップすると正答率のみを表示する", () => {
+    render(<Graph data={[{ label: "4/1", focusMinutes: 12, accuracy: 80 }]} />);
+    fireEvent.click(document.querySelector("rect")!);
+    expect(screen.getByRole("status").textContent).toContain("学習時間：12分");
+    fireEvent.click(screen.getByText("閉じる"));
+    fireEvent.click(document.querySelector("circle")!);
+    expect(screen.getByRole("status").textContent).toContain("正答率：80%");
   });
 });
