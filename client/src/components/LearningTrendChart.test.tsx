@@ -26,9 +26,9 @@ describe("学習推移の系列別詳細", () => {
   it("棒をタップすると学習時間のみ、折れ線をタップすると正答率のみを表示する", () => {
     render(<Graph data={[{ label: "4/1", focusMinutes: 12, accuracy: 80 }]} />);
     fireEvent.click(document.querySelector("rect")!);
-    expect(screen.getByRole("status").textContent).toContain("学習時間：12分");
-    fireEvent.click(screen.getByText("閉じる"));
+    expect(screen.getByRole("status", { name: "学習時間の詳細" }).textContent).toContain("4/1　12分");
+    fireEvent.click(document.querySelector(".recharts-wrapper") ?? document.querySelector("div")!);
     fireEvent.click(document.querySelector("circle")!);
-    expect(screen.getByRole("status").textContent).toContain("正答率：80%");
+    expect(screen.getByRole("status", { name: "正答率の詳細" }).textContent).toContain("4/1　80%");
   });
 });
