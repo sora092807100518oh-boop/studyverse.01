@@ -41,7 +41,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { BookDetail, CardsView, Header } from "./Home";
+import { BookDetail, CardsView, Header, isLearnerOnlyBook } from "./Home";
 
 const books = {
   英単語: [{
@@ -142,6 +142,14 @@ describe("ホーム通知UI", () => {
     expect(screen.getByText("学習ミッション")).toBeTruthy();
     expect(screen.getByText("今週の目標を確認しましょう。")).toBeTruthy();
     expect(notice.className).not.toContain("shadow-[0_0_18px");
+  });
+});
+
+describe("教室教材ラベル", () => {
+  it("教室公開・全体公開を学習専用として判定し、自分の教材とは区別する", () => {
+    expect(isLearnerOnlyBook({ scope: "教室公開" })).toBe(true);
+    expect(isLearnerOnlyBook({ scope: "全体公開" })).toBe(true);
+    expect(isLearnerOnlyBook({ scope: "自分の教材" })).toBe(false);
   });
 });
 

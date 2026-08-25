@@ -86,7 +86,7 @@ describe("管理単語帳CSV", () => {
     expect(screen.queryByText("教室教材を管理")).toBeNull();
     expect(screen.queryByRole("button", { name: "教材を保存" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "CSVをダウンロード" }));
-    expect(click).toHaveBeenCalled(); expect(document.querySelector('a[href^="data:text/csv"]')?.getAttribute("download")).toBe("英語第1章.csv"); expect(hooks.toastSuccess).toHaveBeenCalledWith("単語帳CSVをダウンロードしました。");
+    expect(click).toHaveBeenCalled(); const links = document.querySelectorAll('a[href^="data:text/csv"]'); expect(links[links.length - 1]?.getAttribute("download")).toBe("英語第1章.csv"); expect(hooks.toastSuccess).toHaveBeenCalledWith("単語帳CSVをダウンロードしました。");
     click.mockRestore();
   });
 });
