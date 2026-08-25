@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, pinSessions, recommendedTests, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
-import { createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningDashboard, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, saveStudySet, updateAnnouncement, updateWordbook } from "./db";
+import { createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningDashboard, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, saveStudySet, updateAnnouncement, updateOwnDisplayName, getProfile, updateWordbook } from "./db";
 
 const createdClassroomIds = new Set<number>();
 const createdUserIds = new Set<number>();
@@ -37,6 +37,8 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     const room = await createClassroom(admin.id, { code: `CONTENT-${suffix}`.slice(0, 32), name: `教材検証教室 ${suffix}` }); createdClassroomIds.add(room.id);
     const book = await createWordbook(admin.id, { title: "CSV取込教材", subject: "english", visibility: "classroom", classroomId: room.id });
     const learner = await createPinAccount(admin.id, { classroomId: room.id, displayName: "教材閲覧学習者", pin: "1357" }); createdUserIds.add(learner.userId);
+    await updateOwnDisplayName(learner.userId, "表示名を変更した学習者");
+    expect((await getProfile(learner.userId))?.profile.displayName).toBe("表示名を変更した学習者");
     await expect(previewWordbookCsv(learner.userId, { wordbookId: book.id, csvText: "observe,観察する" })).rejects.toThrow("WORD_BOOK_FORBIDDEN");
     await expect(createWordbook(learner.userId, { title: "権限外教材", subject: "english", visibility: "classroom" })).rejects.toThrow("CLASSROOM_MANAGER_REQUIRED");
     await expect(updateWordbook(learner.userId, book.id, { title: "権限外更新" })).rejects.toThrow("WORD_BOOK_FORBIDDEN");

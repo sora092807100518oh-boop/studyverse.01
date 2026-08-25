@@ -131,7 +131,7 @@ export async function getProfile(userId: number) {
   return rows[0];
 }
 
-const PIN_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
+const PIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const PIN_ATTEMPT_WINDOW_MS = 1000 * 60 * 15;
 const MAX_PIN_ATTEMPTS = 5;
 

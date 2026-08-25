@@ -116,7 +116,7 @@ export const appRouter = router({
         const fingerprint = ctx.req.ip ?? ctx.req.socket.remoteAddress ?? "unknown";
         const result = await authenticateWithPin({ ...input, clientFingerprint: fingerprint });
         const options = getSessionCookieOptions(ctx.req);
-        ctx.res.cookie("studyverse_pin", result.token, { ...options, maxAge: 12 * 60 * 60 * 1000 });
+        ctx.res.cookie("studyverse_pin", result.token, { ...options, maxAge: 30 * 24 * 60 * 60 * 1000 });
         return { profile: result.profile, classroom: result.classroom, expiresAt: result.expiresAt };
       } catch (error) { return toUserMessage(error); }
     }),

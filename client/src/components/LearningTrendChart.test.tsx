@@ -8,7 +8,7 @@ vi.mock("@/lib/trpc", () => ({
 }));
 
 vi.mock("@/components/ui/chart", () => ({ ChartContainer: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, ChartTooltip: () => null, ChartTooltipContent: () => null }));
-vi.mock("recharts", () => ({ Bar: () => null, CartesianGrid: () => null, ComposedChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, Line: () => null, XAxis: () => null, YAxis: () => null }));
+vi.mock("recharts", () => ({ Bar: () => null, CartesianGrid: () => null, ComposedChart: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, Legend: () => null, Line: () => null, XAxis: () => null, YAxis: () => null }));
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { LearningTrendChart } from "./LearningTrendChart";
