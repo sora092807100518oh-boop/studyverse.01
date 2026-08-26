@@ -521,9 +521,9 @@ export async function createRecommendedTest(userId: number, input: { wordbookId:
   if (input.questionCount < 1 || input.questionCount > rangeLength) throw new Error("TEST_QUESTION_COUNT_INVALID");
   if (input.availableUntil && input.availableFrom && input.availableUntil < input.availableFrom) throw new Error("TEST_PERIOD_INVALID");
   const values = classroomIds.map(classroomId => ({ classroomId, authorUserId: userId, wordbookId: book.id, rangeStart: input.rangeStart, rangeEnd: input.rangeEnd, questionCount: input.questionCount, availableFrom: input.availableFrom ?? new Date(Date.now() - 1_000), availableUntil: input.availableUntil ?? null }));
-  await db.insert(recommendedTests).values(values);
+  const createdIds = classroomIds.length === 1 ? (await db.insert(recommendedTests).values(values[0]!).$returningId()).map(item => item.id) : (await db.insert(recommendedTests).values(values), [] as number[]);
   await Promise.all(classroomIds.map(classroomId => writeActivity({ actorUserId: userId, classroomId, category: "classroom", action: "recommendedTest.created", details: `${book.title}｜第${input.rangeStart}〜${input.rangeEnd}語` })));
-  return { targetCount: classroomIds.length };
+  return { id: createdIds[0], createdIds, targetCount: classroomIds.length };
 }
 
 async function decorateRecommendedTests(rows: Array<typeof recommendedTests.$inferSelect>) {

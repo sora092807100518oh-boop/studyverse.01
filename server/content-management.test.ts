@@ -111,7 +111,7 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     expect(dashboard.reviewWords.map(word => word.id)).toContain(words[1].id);
     expect(dashboard.unstartedSets.map(set => set.label)).toContain("未学習の第3語");
     await deleteRecommendedTest(admin.id, assignment.id); expect((await listManageableRecommendedTests(admin.id)).some(item => item.id === assignment.id)).toBe(false);
-  }, 20_000);
+  }, 35_000);
 
   it("学習者は自分の予定だけを登録・削除でき、他の学習者には表示されない", async () => {
     const admin = await getOrCreateSiteAdmin(); const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;

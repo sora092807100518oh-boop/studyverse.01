@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const hooks = vi.hoisted(() => ({ recordAnswer: vi.fn().mockResolvedValue({ success: true }), completeAiSelect: vi.fn().mockResolvedValue({ success: true }), invalidateMonster: vi.fn().mockResolvedValue(undefined) }));
 
@@ -30,5 +30,19 @@ describe("AIセレクト10専用画面", () => {
     fireEvent.click(screen.getByRole("button", { name: /覚えた/ }));
     await waitFor(() => expect(hooks.completeAiSelect).toHaveBeenCalledWith({ subject: "english" }));
     expect(hooks.invalidateMonster).toHaveBeenCalledOnce();
+  });
+
+  it("カードを右へスワイプすると覚えたとして記録し、次のカードへ進む", async () => {
+    vi.useFakeTimers();
+    render(<AiSelectWorkspace onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "このセットを始める" }));
+    const card = screen.getByLabelText("AIセレクトカードをスワイプ");
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 190 });
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: 190 });
+    await act(async () => { await vi.advanceTimersByTimeAsync(260); });
+    expect(hooks.recordAnswer).toHaveBeenCalledWith(expect.objectContaining({ mode: "ai_select", isCorrect: true }));
+    expect(screen.getByLabelText("AIセレクトカードをスワイプ")).toBeTruthy();
+    vi.useRealTimers();
   });
 });
