@@ -22,12 +22,14 @@ export function AiSelectWorkspace({ onBack }: { onBack: () => void }) {
   const cardX = useMotionValue(0);
   const cardRotate = useTransform(cardX, [-420, 0, 420], [-12, 0, 12]);
   const utils = trpc.useUtils();
-  const wordbooks = trpc.wordbooks.list.useQuery({ subject: subject === "英単語" ? "english" : "kanji" }, { retry: false });
+  const wordbooks = trpc.wordbooks.list.useQuery({ subject: subject === "英単語" ? "english" : "kanji" }, { retry: false, staleTime: 5 * 60_000, gcTime: 15 * 60_000, refetchOnWindowFocus: false });
   const recordAnswer = trpc.learning.recordAnswer.useMutation();
   const completeAiSelect = trpc.learning.completeAiSelect.useMutation();
   const words = useMemo<SelectWord[]>(() => {
-    const pool = (wordbooks.data ?? []).flatMap(book => book.words);
-    return pool.map(word => ({ word, key: Math.random() })).sort((a, b) => a.key - b.key).slice(0, 10).map(item => item.word);
+    const candidates = [...(wordbooks.data ?? []).flatMap(book => book.words)];
+    const count = Math.min(10, candidates.length);
+    for (let index = 0; index < count; index += 1) { const choice = index + Math.floor(Math.random() * (candidates.length - index)); [candidates[index], candidates[choice]] = [candidates[choice]!, candidates[index]!]; }
+    return candidates.slice(0, count);
   }, [wordbooks.data, subject]);
   const word = words[index] ?? { id: 0, front: "準備中", back: "単語帳に単語を登録してください。", reading: null };
 
@@ -51,7 +53,7 @@ export function AiSelectWorkspace({ onBack }: { onBack: () => void }) {
   };
   useEffect(() => () => { if (swipeTimer.current) window.clearTimeout(swipeTimer.current); }, []);
   useEffect(() => { cardX.set(0); pointerStart.current = null; didDrag.current = false; }, [index, cardX]);
-  const swipe = (isCorrect: boolean, direction: -1 | 1) => { if (isSaving || savingRef.current || swipeExit) return; pointerStart.current = null; setSwipeExit(direction); void animate(cardX, direction * 760, { duration: 0.24, ease: [0.23, 1, 0.32, 1] }); swipeTimer.current = window.setTimeout(() => void answer(isCorrect), 240); };
+  const swipe = (isCorrect: boolean, direction: -1 | 1) => { if (isSaving || savingRef.current || swipeExit) return; pointerStart.current = null; setSwipeExit(direction); void animate(cardX, direction * 760, { duration: 0.3, ease: [0.23, 1, 0.32, 1] }); swipeTimer.current = window.setTimeout(() => void answer(isCorrect), 310); };
   const pointerDown = (event: React.PointerEvent<HTMLButtonElement>) => { if (isSaving || swipeExit) return; event.preventDefault(); event.currentTarget.setPointerCapture?.(event.pointerId); pointerStart.current = event.clientX; didDrag.current = false; cardX.set(0); };
   const pointerMove = (event: React.PointerEvent<HTMLButtonElement>) => { if (pointerStart.current === null || isSaving || swipeExit) return; const delta = event.clientX - pointerStart.current; if (Math.abs(delta) > 8) didDrag.current = true; cardX.set(delta); };
   const pointerUp = (event: React.PointerEvent<HTMLButtonElement>) => { if (pointerStart.current === null) return; const delta = event.clientX - pointerStart.current; pointerStart.current = null; event.currentTarget.releasePointerCapture?.(event.pointerId); if (Math.abs(delta) >= 58) swipe(delta > 0, delta > 0 ? 1 : -1); else void animate(cardX, 0, { type: "spring", stiffness: 520, damping: 32 }); };

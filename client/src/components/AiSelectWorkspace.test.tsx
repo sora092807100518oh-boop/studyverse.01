@@ -40,7 +40,7 @@ describe("AIセレクト10専用画面", () => {
     fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
     fireEvent.pointerMove(card, { pointerId: 1, clientX: 190 });
     fireEvent.pointerUp(card, { pointerId: 1, clientX: 190 });
-    await act(async () => { await vi.advanceTimersByTimeAsync(260); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(320); });
     expect(hooks.recordAnswer).toHaveBeenCalledWith(expect.objectContaining({ mode: "ai_select", isCorrect: true }));
     expect(screen.getByLabelText("AIセレクトカードをスワイプ")).toBeTruthy();
     vi.useRealTimers();
