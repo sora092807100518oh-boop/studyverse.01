@@ -68,6 +68,20 @@ describe("保存学習セット方式の単語カード", () => {
     expect(screen.getByText("意味2")).toBeTruthy();
     vi.useRealTimers();
   });
+  it("ポインターが取り消されても、移動済みのカードは次のカードへ進む", () => {
+    vi.useFakeTimers();
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    const card = screen.getByLabelText("単語カードをスワイプ");
+    fireEvent.pointerDown(card, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 180 });
+    fireEvent.pointerCancel(card, { pointerId: 1 });
+    act(() => { vi.advanceTimersByTime(260); });
+    expect(screen.getByText("意味2")).toBeTruthy();
+    vi.useRealTimers();
+  });
   it("テストでは出題数に応じた制限時間を表示し、時間切れ後に未回答から再開できる", () => {
     vi.useFakeTimers();
     render(<CardsWorkspace books={books} />);
