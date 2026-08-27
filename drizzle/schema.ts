@@ -179,6 +179,22 @@ export const savedStudySets = mysqlTable("savedStudySets", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const practiceResumes = mysqlTable("practiceResumes", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  classroomId: int("classroomId").notNull(),
+  subject: mysqlEnum("subject", ["english", "kanji"]).notNull(),
+  wordIdsJson: text("wordIdsJson").notNull(),
+  currentIndex: int("currentIndex").notNull(),
+  knownCount: int("knownCount").default(0).notNull(),
+  reviewCount: int("reviewCount").default(0).notNull(),
+  missedWordIdsJson: text("missedWordIdsJson").notNull(),
+  cardOrder: mysqlEnum("cardOrder", ["normal", "reverse", "random"]).default("normal").notNull(),
+  wordPool: mysqlEnum("wordPool", ["normal", "mistakes"]).default("normal").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [uniqueIndex("practice_resumes_user_id_unique").on(table.userId)]);
+
 export const revivalDays = mysqlTable("revivalDays", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
