@@ -140,6 +140,17 @@ describe("集中時間の即時表示", () => {
   });
 });
 
+describe("途中練習の再開導線", () => {
+  it("学習の推移の直上に表示し、カード全体を押すと練習を再開する", () => {
+    const onResumePractice = vi.fn();
+    render(<HomeView setPage={vi.fn()} onOpenReview={vi.fn()} onPreloadAiSelect={vi.fn()} onResumePractice={onResumePractice} practiceResume={{ version: 1, subject: "英単語", words: [{ front: "alpha", back: "最初" }], index: 0, result: { known: 0, review: 0 }, missedWords: [], order: "normal", pool: "normal", savedAt: "2026-08-27T00:00:00.000Z" }} running={false} elapsed={0} timerDurationMinutes={25} showTopTimer onToggleTimer={vi.fn()} onResetTimer={vi.fn()} onDurationChange={vi.fn()} onShowTopTimerChange={vi.fn()} summary={{ totalFocusSeconds: 0, retention: 0, streak: 0, records: 0 }} />);
+    const resume = screen.getByTestId("practice-resume-card"); const trend = screen.getByTestId("live-learning-trend");
+    expect(resume.compareDocumentPosition(trend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(resume);
+    expect(onResumePractice).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("カード回答の記録UI", () => {
   it("保存中は重複操作を防ぎ、成功した回答だけを結果画面へ反映する", async () => {
     const saved = deferred<{ success: true }>();
