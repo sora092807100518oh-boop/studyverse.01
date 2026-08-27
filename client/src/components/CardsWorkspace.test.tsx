@@ -47,6 +47,14 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("最初")).toBeTruthy();
   });
+  it("練習の開始時点で、ホーム再開用の先頭カード情報を保存する", () => {
+    const started = vi.fn();
+    render(<CardsWorkspace books={books} onPracticeStarted={started} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    expect(started).toHaveBeenCalledWith(expect.objectContaining({ version: 1, subject: "英単語", index: 0, words: expect.any(Array) }));
+  });
   it("先生配信テストを開始できる", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText(/配信教材/));
