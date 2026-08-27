@@ -18,7 +18,7 @@ export function MonsterArtwork({ images, eggNumber, stage, className = "" }: { i
   return <div className={`grid h-full w-full place-items-center rounded-2xl border border-dashed border-amber-100/50 bg-slate-950/25 p-3 text-center text-xs leading-5 text-amber-50 ${className}`}>画像未登録<br />卵{eggNumber}・進化{stage}</div>;
 }
 
-export function MonsterGrowthPanel() {
+export function MonsterGrowthPanel({ liveFocusSeconds = 0 }: { liveFocusSeconds?: number }) {
   const utils = trpc.useUtils();
   const dashboard = trpc.monster.dashboard.useQuery(undefined, { retry: false, staleTime: 20_000 });
   const startNew = trpc.monster.startNew.useMutation();
@@ -32,6 +32,8 @@ export function MonsterGrowthPanel() {
   const availableEggs = data.eggs.filter(egg => !egg.consumedAt);
   const selectedEgg = data.nextCycleEggNumber ?? (availableEggs.some(egg => egg.eggNumber === eggChoice) ? eggChoice : availableEggs[0]?.eggNumber ?? "1");
   const isCycleReady = progress.stage === 13 && data.allThreeCompleted && Boolean(data.nextCycleEggNumber);
+  const visibleFocusSeconds = data.totalFocusSeconds + liveFocusSeconds;
+  const visibleFocusLabel = `${Math.floor(visibleFocusSeconds / 3600)}時間${Math.floor((visibleFocusSeconds % 3600) / 60)}分${visibleFocusSeconds % 60}秒`;
   const beginNew = async () => {
     try {
       await startNew.mutateAsync({ eggNumber: selectedEgg as "1" | "2" | "3" });
@@ -56,7 +58,7 @@ export function MonsterGrowthPanel() {
           <p className="text-xs text-amber-100">現在育てている</p><p className="mt-1 text-2xl font-extrabold text-white">進化 {String(progress.stage).padStart(2, "0")} <span className="text-sm font-medium text-emerald-100">/ 13</span></p>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-gradient-to-r from-amber-200 via-emerald-200 to-cyan-200 transition-all" style={{ width: `${progress.stageProgress}%` }} /></div>
           <p className="mt-2 font-mono text-[10px] text-amber-50">{progress.stage === 13 ? "最終進化を達成しました" : `次の進化まで ${progress.minutesToNext}分`}</p>
-          <p className="mt-1 text-[10px] text-slate-200">学習 {Math.floor(data.totalFocusSeconds / 3600)}時間・ミッション {data.claimedPoints}分</p>
+          <p className="mt-1 text-[10px] text-slate-200">学習 {visibleFocusLabel}・ミッション {data.claimedPoints}分</p>
         </div>
       </div>
       {progress.stage === 13 && <div className="mt-3 rounded-2xl border border-amber-100/30 bg-slate-950/55 p-3 backdrop-blur-md">

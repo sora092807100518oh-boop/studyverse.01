@@ -16,6 +16,7 @@ vi.mock("@/lib/trpc", () => ({
       recordAnswer: {
         useMutation: () => ({ mutateAsync: hooks.mutateAsync }),
       },
+      dashboard: { useQuery: () => ({ data: { reviewWords: [], unstartedSets: [] } }) },
     },
     useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } } }),
     auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前" } } }) } },
@@ -32,6 +33,7 @@ vi.mock("@/lib/trpc", () => ({
       downloadCsv: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
     },
     classroom: {
+      calendar: { list: { useQuery: () => ({ data: [] }) }, create: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) }, deletePersonal: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) } },
       announcements: {
         list: { useQuery: () => ({ data: hooks.announcements, isLoading: false, isError: false, refetch: vi.fn() }) },
       },
@@ -40,6 +42,9 @@ vi.mock("@/lib/trpc", () => ({
 }));
 
 vi.mock("@/contexts/ThemeContext", () => ({ useTheme: () => ({ theme: "dark", toggleTheme: vi.fn() }) }));
+vi.mock("@/components/LearningTrendChart", () => ({ LearningTrendChart: ({ liveFocusSeconds }: { liveFocusSeconds?: number }) => <div data-testid="live-learning-trend">{liveFocusSeconds}</div> }));
+vi.mock("@/components/LearningCalendar", () => ({ LearningCalendar: () => <div>学習カレンダー</div> }));
+vi.mock("@/components/MonsterWorkspace", () => ({ MonsterGrowthPanel: () => <div>モンスター育成</div>, MonsterMissionPanel: () => <div>モンスターミッション</div>, MonsterSettingsManager: () => <div>モンスター設定</div> }));
 
 vi.mock("sonner", () => ({
   toast: {
@@ -49,7 +54,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { BookDetail, CardsView, Header, ProfileControls, TimerCard, TimerStrip, isLearnerOnlyBook } from "./Home";
+import { BookDetail, CardsView, Header, HomeView, ProfileControls, TimerCard, TimerStrip, isLearnerOnlyBook } from "./Home";
 
 const books = {
   英単語: [{
@@ -120,6 +125,18 @@ describe("学習プロフィール", () => {
     render(<ProfileControls />);
     expect(screen.getByText("ユーザーネーム")).toBeTruthy();
     expect(screen.getByTestId("profile-username").textContent).toBe("学習者の名前");
+  });
+});
+
+describe("集中時間の即時表示", () => {
+  const props = { setPage: vi.fn(), onOpenReview: vi.fn(), onPreloadAiSelect: vi.fn(), onResumePractice: vi.fn(), timerDurationMinutes: 25, showTopTimer: true, onToggleTimer: vi.fn(), onResetTimer: vi.fn(), onDurationChange: vi.fn(), onShowTopTimerChange: vi.fn(), summary: { totalFocusSeconds: 0, retention: 0, streak: 0, records: 0 } };
+  it("タイマー作動中は、保存前の経過秒数をホーム合計と学習推移へ反映する", () => {
+    const { rerender } = render(<HomeView {...props} running elapsed={65} />);
+    expect(screen.getByText("1m 5s")).toBeTruthy();
+    expect(screen.getByTestId("live-learning-trend").textContent).toBe("65");
+    rerender(<HomeView {...props} running elapsed={130} />);
+    expect(screen.getByText("2m 10s")).toBeTruthy();
+    expect(screen.getByTestId("live-learning-trend").textContent).toBe("130");
   });
 });
 

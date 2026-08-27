@@ -87,6 +87,15 @@ describe("保存学習セット方式の単語カード", () => {
     expect(interrupted).toHaveBeenCalledWith(expect.objectContaining({ version: 1, subject: "英単語", index: 1, result: { known: 1, review: 0 }, words: expect.any(Array) }));
     expect(screen.getByText("保存済みの学習セット")).toBeTruthy();
   });
+  it("画面移動で練習画面が閉じた場合にも、途中位置を保存する", () => {
+    const interrupted = vi.fn();
+    const { unmount } = render(<CardsWorkspace books={books} onPracticeInterrupted={interrupted} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    unmount();
+    expect(interrupted).toHaveBeenCalledWith(expect.objectContaining({ version: 1, index: 0, words: expect.any(Array) }));
+  });
   it("保存済みの練習は、回答済みカードを飛ばして途中の位置から再開する", () => {
     render(<CardsWorkspace books={books} practiceResume={{ version: 1, subject: "英単語", words: [{ id: 101, front: "alpha", back: "最初" }, { id: 102, front: "beta", back: "次" }], index: 1, result: { known: 1, review: 0 }, missedWords: [], order: "normal", pool: "normal", savedAt: "2026-08-27T00:00:00.000Z" }} />);
     expect(screen.getByText("次")).toBeTruthy();
