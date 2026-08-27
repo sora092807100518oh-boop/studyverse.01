@@ -1,7 +1,7 @@
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, practiceResumes, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -351,14 +351,12 @@ export async function deleteClassroom(userId: number, classroomId: number) {
     await tx.delete(calendarEvents).where(eq(calendarEvents.classroomId, classroomId));
     await tx.delete(studyRecords).where(eq(studyRecords.classroomId, classroomId));
     await tx.delete(focusSessions).where(eq(focusSessions.classroomId, classroomId));
-    await tx.delete(practiceResumes).where(eq(practiceResumes.classroomId, classroomId));
     await tx.delete(journalEntries).where(eq(journalEntries.classroomId, classroomId));
     await tx.delete(teacherAdminSessions).where(eq(teacherAdminSessions.classroomId, classroomId));
     await tx.delete(pinSessions).where(eq(pinSessions.classroomId, classroomId));
     await tx.delete(activityLogs).where(eq(activityLogs.classroomId, classroomId));
     if (memberUserIds.length) {
       await tx.delete(savedStudySets).where(inArray(savedStudySets.userId, memberUserIds));
-      await tx.delete(practiceResumes).where(inArray(practiceResumes.userId, memberUserIds));
       await tx.delete(revivalDays).where(inArray(revivalDays.userId, memberUserIds));
       await tx.delete(monsterMissionClaims).where(inArray(monsterMissionClaims.userId, memberUserIds));
       await tx.delete(monsterEggs).where(inArray(monsterEggs.userId, memberUserIds));
@@ -1011,34 +1009,6 @@ export async function saveStudySet(userId: number, input: { wordbookId: number; 
 }
 
 export async function deleteSavedStudySet(userId: number, savedStudySetId: number) { const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); await db.delete(savedStudySets).where(and(eq(savedStudySets.id, savedStudySetId), eq(savedStudySets.userId, userId))); }
-
-type PracticeResumeInput = { subject: "english" | "kanji"; wordIds: number[]; currentIndex: number; knownCount: number; reviewCount: number; missedWordIds: number[]; cardOrder: "normal" | "reverse" | "random"; wordPool: "normal" | "mistakes" };
-
-function practiceResumeWordIds(value: string) { try { const parsed: unknown = JSON.parse(value); return Array.isArray(parsed) && parsed.every(id => Number.isInteger(id) && id > 0) ? parsed as number[] : []; } catch { return []; } }
-
-export async function savePracticeResume(userId: number, input: PracticeResumeInput) {
-  const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const profile = await getProfile(userId); if (!profile) throw new Error("CLASSROOM_REQUIRED");
-  if (!input.wordIds.length || input.currentIndex < 0 || input.currentIndex >= input.wordIds.length) throw new Error("PRACTICE_RESUME_INVALID");
-  const visibleBooks = await listVisibleWordbooks(userId); const allowedWordIds = new Set(visibleBooks.filter(book => book.subject === input.subject).flatMap(book => book.words.map(word => word.id)));
-  if (input.wordIds.some(id => !allowedWordIds.has(id)) || input.missedWordIds.some(id => !allowedWordIds.has(id))) throw new Error("PRACTICE_RESUME_WORD_FORBIDDEN");
-  await db.insert(practiceResumes).values({ userId, classroomId: profile.profile.classroomId, subject: input.subject, wordIdsJson: JSON.stringify(input.wordIds), currentIndex: input.currentIndex, knownCount: input.knownCount, reviewCount: input.reviewCount, missedWordIdsJson: JSON.stringify(input.missedWordIds), cardOrder: input.cardOrder, wordPool: input.wordPool }).onDuplicateKeyUpdate({ set: { classroomId: profile.profile.classroomId, subject: input.subject, wordIdsJson: JSON.stringify(input.wordIds), currentIndex: input.currentIndex, knownCount: input.knownCount, reviewCount: input.reviewCount, missedWordIdsJson: JSON.stringify(input.missedWordIds), cardOrder: input.cardOrder, wordPool: input.wordPool } });
-  return { success: true } as const;
-}
-
-export async function getPracticeResume(userId: number) {
-  const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const saved = (await db.select().from(practiceResumes).where(eq(practiceResumes.userId, userId)).limit(1))[0];
-  if (!saved) return null;
-  const requestedIds = practiceResumeWordIds(saved.wordIdsJson); const missedIds = practiceResumeWordIds(saved.missedWordIdsJson);
-  const visibleBooks = await listVisibleWordbooks(userId); const visibleWords = new Map(visibleBooks.filter(book => book.subject === saved.subject).flatMap(book => book.words).map(word => [word.id, word]));
-  const words = requestedIds.map(id => visibleWords.get(id)).filter((word): word is NonNullable<typeof word> => Boolean(word));
-  if (!words.length) { await db.delete(practiceResumes).where(eq(practiceResumes.userId, userId)); return null; }
-  const missedWords = missedIds.map(id => visibleWords.get(id)).filter((word): word is NonNullable<typeof word> => Boolean(word));
-  return { version: 1 as const, subject: saved.subject === "english" ? "英単語" as const : "漢字" as const, words, index: Math.min(saved.currentIndex, words.length - 1), result: { known: saved.knownCount, review: saved.reviewCount }, missedWords, order: saved.cardOrder, pool: saved.wordPool, savedAt: saved.updatedAt.toISOString() };
-}
-
-export async function clearPracticeResume(userId: number) { const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); await db.delete(practiceResumes).where(eq(practiceResumes.userId, userId)); return { success: true } as const; }
 
 export async function updateOwnDisplayName(userId: number, displayName: string) { const profile = await getProfile(userId); if (!profile) throw new Error("CLASSROOM_REQUIRED"); const normalized = displayName.trim(); if (!normalized || normalized.length > 80) throw new Error("DISPLAY_NAME_INVALID"); const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); await db.update(studentProfiles).set({ displayName: normalized }).where(eq(studentProfiles.id, profile.profile.id)); return { displayName: normalized }; }
 

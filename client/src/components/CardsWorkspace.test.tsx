@@ -30,7 +30,7 @@ import { CardsWorkspace } from "./CardsWorkspace";
 
 const books = { 英単語: [{ id: "local", name: "ローカル教材", words: [{ front: "local", back: "ローカル" }] }], 漢字: [] };
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); window.localStorage.clear(); vi.clearAllMocks(); });
 
 describe("保存学習セット方式の単語カード", () => {
   it("単語帳の範囲を学習セットとして保存できる", () => {
@@ -47,13 +47,17 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("最初")).toBeTruthy();
   });
-  it("練習の開始時点で、ホーム再開用の先頭カード情報を保存する", () => {
-    const started = vi.fn();
-    render(<CardsWorkspace books={books} onPracticeStarted={started} />);
+  it("練習設定の続きからをオンにすると、保存された途中のカードから再開する", () => {
+    window.localStorage.setItem("studyverse-practice-continue", JSON.stringify({ version: 1, subject: "英単語", words: [{ id: 101, front: "alpha", back: "最初" }, { id: 102, front: "beta", back: "次" }], index: 1, result: { known: 1, review: 0 }, missedWords: [], order: "normal", pool: "normal", savedAt: "2026-08-27T00:00:00.000Z" }));
+    render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    const continueButton = screen.getByRole("switch", { name: /続きから/ });
+    expect((continueButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(continueButton);
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
-    expect(started).toHaveBeenCalledWith(expect.objectContaining({ version: 1, subject: "英単語", index: 0, words: expect.any(Array) }));
+    expect(screen.getByText("練習 2 / 2")).toBeTruthy();
+    expect(screen.getByText("次")).toBeTruthy();
   });
   it("先生配信テストを開始できる", () => {
     render(<CardsWorkspace books={books} />);
@@ -84,30 +88,22 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.pointerCancel(card, { pointerId: 1 });
     expect(screen.getByText("意味2")).toBeTruthy();
   });
-  it("練習を途中で終了すると、現在位置と結果を再開用データとして渡す", () => {
-    const interrupted = vi.fn();
-    render(<CardsWorkspace books={books} onPracticeInterrupted={interrupted} />);
+  it("練習を途中で終了すると、続きから用の進行位置を端末に保存する", () => {
+    render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     fireEvent.click(screen.getByRole("button", { name: /覚えた/ }));
     fireEvent.click(screen.getByRole("button", { name: "終了する" }));
-    expect(interrupted).toHaveBeenCalledWith(expect.objectContaining({ version: 1, subject: "英単語", index: 1, result: { known: 1, review: 0 }, words: expect.any(Array) }));
+    expect(JSON.parse(window.localStorage.getItem("studyverse-practice-continue") ?? "{}" )).toMatchObject({ version: 1, subject: "英単語", index: 1, result: { known: 1, review: 0 } });
     expect(screen.getByText("保存済みの学習セット")).toBeTruthy();
   });
-  it("画面移動で練習画面が閉じた場合にも、途中位置を保存する", () => {
-    const interrupted = vi.fn();
-    const { unmount } = render(<CardsWorkspace books={books} onPracticeInterrupted={interrupted} />);
+  it("練習を開始すると、続きから用の先頭位置を端末に保存する", () => {
+    render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
-    unmount();
-    expect(interrupted).toHaveBeenCalledWith(expect.objectContaining({ version: 1, index: 0, words: expect.any(Array) }));
-  });
-  it("保存済みの練習は、回答済みカードを飛ばして途中の位置から再開する", () => {
-    render(<CardsWorkspace books={books} practiceResume={{ version: 1, subject: "英単語", words: [{ id: 101, front: "alpha", back: "最初" }, { id: 102, front: "beta", back: "次" }], index: 1, result: { known: 1, review: 0 }, missedWords: [], order: "normal", pool: "normal", savedAt: "2026-08-27T00:00:00.000Z" }} />);
-    expect(screen.getByText("次")).toBeTruthy();
-    expect(screen.getByText("練習 2 / 2")).toBeTruthy();
+    expect(JSON.parse(window.localStorage.getItem("studyverse-practice-continue") ?? "{}" )).toMatchObject({ version: 1, index: 0, words: expect.any(Array) });
   });
   it("テストでは出題数に応じた制限時間を表示し、時間切れ後に未回答から再開できる", () => {
     vi.useFakeTimers();

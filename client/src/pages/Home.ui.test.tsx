@@ -17,9 +17,8 @@ vi.mock("@/lib/trpc", () => ({
         useMutation: () => ({ mutateAsync: hooks.mutateAsync }),
       },
       dashboard: { useQuery: () => ({ data: { reviewWords: [], unstartedSets: [] } }) },
-      practiceResume: { get: { useQuery: () => ({ data: null, isSuccess: true }) }, save: { useMutation: () => ({ mutateAsync: hooks.mutateAsync }) }, clear: { useMutation: () => ({ mutateAsync: hooks.mutateAsync }) } },
     },
-    useUtils: () => ({ learning: { practiceResume: { get: { invalidate: hooks.invalidate } } }, wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } } }),
+    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } } }),
     auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前" } } }) } },
     profile: { updateName: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) } },
     monster: { dashboard: { useQuery: () => ({ data: { eggs: [] } }) } },
@@ -130,7 +129,7 @@ describe("学習プロフィール", () => {
 });
 
 describe("集中時間の即時表示", () => {
-  const props = { setPage: vi.fn(), onOpenReview: vi.fn(), onPreloadAiSelect: vi.fn(), onResumePractice: vi.fn(), timerDurationMinutes: 25, showTopTimer: true, onToggleTimer: vi.fn(), onResetTimer: vi.fn(), onDurationChange: vi.fn(), onShowTopTimerChange: vi.fn(), summary: { totalFocusSeconds: 0, retention: 0, streak: 0, records: 0 } };
+  const props = { setPage: vi.fn(), onOpenReview: vi.fn(), onPreloadAiSelect: vi.fn(), timerDurationMinutes: 25, showTopTimer: true, onToggleTimer: vi.fn(), onResetTimer: vi.fn(), onDurationChange: vi.fn(), onShowTopTimerChange: vi.fn(), summary: { totalFocusSeconds: 0, retention: 0, streak: 0, records: 0 } };
   it("タイマー作動中は、保存前の経過秒数をホーム合計と学習推移へ反映する", () => {
     const { rerender } = render(<HomeView {...props} running elapsed={65} />);
     expect(screen.getByText("1m 5s")).toBeTruthy();
@@ -138,17 +137,6 @@ describe("集中時間の即時表示", () => {
     rerender(<HomeView {...props} running elapsed={130} />);
     expect(screen.getByText("2m 10s")).toBeTruthy();
     expect(screen.getByTestId("live-learning-trend").textContent).toBe("130");
-  });
-});
-
-describe("途中練習の再開導線", () => {
-  it("学習の推移の直上に表示し、カード全体を押すと練習を再開する", () => {
-    const onResumePractice = vi.fn();
-    render(<HomeView setPage={vi.fn()} onOpenReview={vi.fn()} onPreloadAiSelect={vi.fn()} onResumePractice={onResumePractice} practiceResume={{ version: 1, subject: "英単語", words: [{ front: "alpha", back: "最初" }], index: 0, result: { known: 0, review: 0 }, missedWords: [], order: "normal", pool: "normal", savedAt: "2026-08-27T00:00:00.000Z" }} running={false} elapsed={0} timerDurationMinutes={25} showTopTimer onToggleTimer={vi.fn()} onResetTimer={vi.fn()} onDurationChange={vi.fn()} onShowTopTimerChange={vi.fn()} summary={{ totalFocusSeconds: 0, retention: 0, streak: 0, records: 0 }} />);
-    const resume = screen.getByTestId("practice-resume-card"); const trend = screen.getByTestId("live-learning-trend");
-    expect(resume.compareDocumentPosition(trend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(resume);
-    expect(onResumePractice).toHaveBeenCalledTimes(1);
   });
 });
 
