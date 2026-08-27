@@ -772,13 +772,19 @@ export async function getLearningDashboard(userId: number) {
   return { wordbooks, reviewWords, unstartedSets, mistakeCounts };
 }
 
-export async function recordFocusSession(userId: number, input: { startedAt: Date; completedAt: Date; focusSeconds: number }) {
+export async function recordFocusSession(userId: number, input: { clientSessionId: string; startedAt: Date; completedAt: Date; focusSeconds: number }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const profile = await getProfile(userId);
   if (!profile) throw new Error("CLASSROOM_REQUIRED");
+  const existing = await db.select({ userId: focusSessions.userId }).from(focusSessions).where(eq(focusSessions.clientSessionId, input.clientSessionId)).limit(1);
+  if (existing[0]) {
+    if (existing[0].userId !== userId) throw new Error("FOCUS_SESSION_CONFLICT");
+    return { saved: false } as const;
+  }
   await db.insert(focusSessions).values({ userId, classroomId: profile.profile.classroomId, ...input });
   await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "learning", action: "focus.completed", details: `${input.focusSeconds}s` });
+  return { saved: true } as const;
 }
 
 export async function getLearningSummary(userId: number) {
@@ -836,9 +842,16 @@ export async function getMonsterDashboard(userId: number) {
   const mission = buildMissionState({ startedAt: active.startedAt, records, activities });
   const claimedKeys = new Set(claims.map(claim => `${claim.missionKey}:${claim.periodKey}`));
   const claimedPointsSinceStart = claims.filter(claim => claim.claimedAt >= active!.startedAt).reduce((sum, claim) => sum + claim.points, 0);
-  const focusSecondsSinceStart = sessions.filter(session => session.completedAt >= active!.startedAt).reduce((sum, session) => sum + session.focusSeconds, 0);
+  const focusSessionsSinceStart = sessions.filter(session => session.completedAt >= active!.startedAt);
+  const focusSecondsSinceStart = focusSessionsSinceStart.reduce((sum, session) => sum + session.focusSeconds, 0);
   const activeProgress = calculateMonsterStage(focusSecondsSinceStart, claimedPointsSinceStart);
-  if (activeProgress.stage === 13 && !active.completedAt) await db.update(monsterProfiles).set({ completedAt: new Date() }).where(eq(monsterProfiles.id, active.id));
+  let activeCompletedAt = active.completedAt;
+  if (activeProgress.stage === 13 && !active.completedAt) {
+    const now = new Date();
+    const latestFocusCompletedAt = focusSessionsSinceStart.reduce<Date | null>((latest, session) => !latest || session.completedAt > latest ? session.completedAt : latest, null);
+    activeCompletedAt = latestFocusCompletedAt && latestFocusCompletedAt > now ? latestFocusCompletedAt : now;
+    await db.update(monsterProfiles).set({ completedAt: activeCompletedAt }).where(eq(monsterProfiles.id, active.id));
+  }
   const eggs = await db.select().from(monsterEggs).where(eq(monsterEggs.userId, userId)).orderBy(desc(monsterEggs.acquiredAt));
   const images = await db.select().from(monsterImageSettings).orderBy(monsterImageSettings.slotKey);
   const history = allProfiles.map(profile => {
@@ -846,7 +859,12 @@ export async function getMonsterDashboard(userId: number) {
     const profilePoints = claims.filter(claim => claim.claimedAt >= profile.startedAt && (!profile.completedAt || claim.claimedAt <= profile.completedAt)).reduce((sum, claim) => sum + claim.points, 0);
     return { ...profile, progression: calculateMonsterStage(profileFocus, profilePoints) };
   });
-  return { active: { ...active, progression: activeProgress }, totalFocusSeconds, claimedPoints: claimedPointsSinceStart, eggs, history, images, mission: { daily: mission.daily, monthly: mission.monthly, claimable: mission.rewards.filter(reward => !claimedKeys.has(`${reward.missionKey}:${reward.periodKey}`)), claimedKeys: Array.from(claimedKeys) } };
+  const eggNumbers: MonsterEggNumber[] = ["1", "2", "3"];
+  const completedEggNumbers = new Set(history.filter(profile => profile.progression.stage === 13).map(profile => profile.eggNumber));
+  const allThreeCompleted = eggNumbers.every(eggNumber => completedEggNumbers.has(eggNumber));
+  const completionCounts = new Map<MonsterEggNumber, number>(eggNumbers.map(eggNumber => [eggNumber, history.filter(profile => profile.eggNumber === eggNumber && profile.progression.stage === 13).length]));
+  const nextCycleEggNumber = allThreeCompleted ? [...eggNumbers].sort((left, right) => (completionCounts.get(left) ?? 0) - (completionCounts.get(right) ?? 0) || Number(left) - Number(right))[0] : null;
+  return { active: { ...active, completedAt: activeCompletedAt, progression: activeProgress }, totalFocusSeconds, claimedPoints: claimedPointsSinceStart, eggs, history, images, completedEggNumbers: Array.from(completedEggNumbers), allThreeCompleted, nextCycleEggNumber, mission: { daily: { ...mission.daily, periodKey: mission.today }, monthly: { ...mission.monthly, periodKey: mission.month }, claimable: mission.rewards.filter(reward => !claimedKeys.has(`${reward.missionKey}:${reward.periodKey}`)), claimedKeys: Array.from(claimedKeys) } };
 }
 
 export async function claimMonsterMission(userId: number, missionKey: string, periodKey: string) {
@@ -862,6 +880,20 @@ export async function claimMonsterMission(userId: number, missionKey: string, pe
   return { points: reward.points, label: reward.label };
 }
 
+export async function claimAvailableMonsterMissions(userId: number) {
+  const dashboard = await getMonsterDashboard(userId);
+  const rewards = dashboard.mission.claimable;
+  if (!rewards.length) return { claims: [], totalPoints: 0 } as const;
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await db.transaction(async tx => {
+    for (const reward of rewards) await tx.insert(monsterMissionClaims).values({ userId, missionKey: reward.missionKey, periodKey: reward.periodKey, points: reward.points });
+  });
+  const profile = await getProfile(userId);
+  await writeActivity({ actorUserId: userId, classroomId: profile?.profile.classroomId, category: "learning", action: "monster.missions_claimed", details: `${rewards.length}件` });
+  return { claims: rewards, totalPoints: rewards.reduce((sum, reward) => sum + reward.points, 0) };
+}
+
 export async function recordAiSelectCompletion(userId: number, subject: "english" | "kanji") {
   const profile = await getProfile(userId);
   if (!profile) throw new Error("CLASSROOM_REQUIRED");
@@ -873,7 +905,14 @@ export async function startNewMonster(userId: number, eggNumber: MonsterEggNumbe
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const dashboard = await getMonsterDashboard(userId);
   if (dashboard.active.progression.stage !== 13) throw new Error("MONSTER_NOT_COMPLETE");
-  const egg = dashboard.eggs.find(item => item.eggNumber === eggNumber && !item.consumedAt);
+  let egg = dashboard.eggs.find(item => item.eggNumber === eggNumber && !item.consumedAt);
+  if (dashboard.allThreeCompleted) {
+    if (dashboard.nextCycleEggNumber !== eggNumber) throw new Error("MONSTER_CYCLE_ORDER_REQUIRED");
+    const createdEgg = await db.insert(monsterEggs).values({ userId, eggNumber, source: "completion" }).$returningId();
+    const createdEggId = createdEgg[0]?.id;
+    if (!createdEggId) throw new Error("MONSTER_EGG_CREATE_FAILED");
+    egg = (await db.select().from(monsterEggs).where(eq(monsterEggs.id, createdEggId)).limit(1))[0];
+  }
   if (!egg) throw new Error("MONSTER_EGG_UNAVAILABLE");
   await db.update(monsterProfiles).set({ active: false, completedAt: dashboard.active.completedAt ?? new Date() }).where(eq(monsterProfiles.id, dashboard.active.id));
   // MySQL timestamp columns can be second precision. Start from the next second so
@@ -930,9 +969,9 @@ export async function getLearningTrend(userId: number, period: LearningTrendPeri
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const [sessions, records] = await Promise.all([db.select().from(focusSessions).where(eq(focusSessions.userId, userId)), db.select().from(studyRecords).where(eq(studyRecords.userId, userId))]);
   const points = createTrendBuckets(period); const byKey = new Map(points.map(point => [point.key, point]));
-  for (const session of sessions) { const point = byKey.get(getTrendKey(session.completedAt, period)); if (point) point.focusMinutes += Math.round(session.focusSeconds / 60); }
+  for (const session of sessions) { const point = byKey.get(getTrendKey(session.completedAt, period)); if (point) point.focusMinutes += session.focusSeconds / 60; }
   for (const record of records) { const point = byKey.get(getTrendKey(record.answeredAt, period)); if (point) { point.answers += 1; if (record.isCorrect) point.correct += 1; } }
-  return points.map(({ correct, ...point }) => ({ ...point, accuracy: point.answers ? Math.round((correct / point.answers) * 100) : 0 }));
+  return points.map(({ correct, ...point }) => ({ ...point, focusMinutes: Math.round(point.focusMinutes * 10) / 10, accuracy: point.answers ? Math.round((correct / point.answers) * 100) : 0 }));
 }
 
 export async function getManagementInsights(userId: number) {

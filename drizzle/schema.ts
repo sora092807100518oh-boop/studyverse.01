@@ -125,11 +125,12 @@ export const focusSessions = mysqlTable("focusSessions", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   classroomId: int("classroomId").notNull(),
+  clientSessionId: varchar("clientSessionId", { length: 96 }),
   startedAt: timestamp("startedAt").notNull(),
   completedAt: timestamp("completedAt").notNull(),
   focusSeconds: int("focusSeconds").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-});
+}, table => [uniqueIndex("focus_sessions_client_session_id_unique").on(table.clientSessionId)]);
 
 export const announcements = mysqlTable("announcements", {
   id: int("id").autoincrement().primaryKey(),

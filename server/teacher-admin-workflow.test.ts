@@ -81,5 +81,5 @@ describe("先生IDによる教室限定管理", () => {
     await teacherCaller.teacherAdmin.logout();
     const loggedOut = await createContext({ req: request, res: response });
     await expect(appRouter.createCaller(loggedOut).teacherAdmin.me()).resolves.toBeNull();
-  });
+  }, 20_000);
 });

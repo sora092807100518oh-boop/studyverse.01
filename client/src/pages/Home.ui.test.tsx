@@ -17,7 +17,11 @@ vi.mock("@/lib/trpc", () => ({
         useMutation: () => ({ mutateAsync: hooks.mutateAsync }),
       },
     },
-    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } } }),
+    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } } }),
+    auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前" } } }) } },
+    profile: { updateName: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) } },
+    monster: { dashboard: { useQuery: () => ({ data: { eggs: [] } }) } },
+    calendar: { dashboard: { useQuery: () => ({ data: { revivalTickets: 2 } }) } },
     wordbooks: {
       addWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
       updateWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
@@ -45,7 +49,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { BookDetail, CardsView, Header, TimerCard, TimerStrip, isLearnerOnlyBook } from "./Home";
+import { BookDetail, CardsView, Header, ProfileControls, TimerCard, TimerStrip, isLearnerOnlyBook } from "./Home";
 
 const books = {
   英単語: [{
@@ -108,6 +112,14 @@ describe("上部タイマー表示", () => {
     expect(screen.queryByLabelText("集中時間（分）")).toBeNull();
     fireEvent.click(screen.getByRole("checkbox"));
     expect(onShowTopTimerChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("学習プロフィール", () => {
+  it("保存済みの表示名をユーザーネームとして視認できるよう表示する", () => {
+    render(<ProfileControls />);
+    expect(screen.getByText("ユーザーネーム")).toBeTruthy();
+    expect(screen.getByTestId("profile-username").textContent).toBe("学習者の名前");
   });
 });
 

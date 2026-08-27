@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
 import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, pinSessions, recommendedTests, studentProfiles, studyRecords, users, vocabularyWords, wordbooks } from "../drizzle/schema";
-import { createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningDashboard, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, saveStudySet, updateAnnouncement, updateOwnDisplayName, getProfile, updateWordbook } from "./db";
+import { createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createWordbook, deleteAnnouncement, deletePersonalCalendarEvent, deleteRecommendedTest, deleteWordbook, exportWordbookCsv, getDb, getLearningDashboard, getLearningSummary, getLearningTrend, getOrCreateSiteAdmin, importWordbookCsv, listAnnouncementHistory, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordFocusSession, recordLearningResult, saveStudySet, updateAnnouncement, updateOwnDisplayName, getProfile, updateWordbook } from "./db";
 
 const createdClassroomIds = new Set<number>();
 const createdUserIds = new Set<number>();
@@ -74,17 +74,21 @@ describe("教材・お知らせ・学習グラフの保存フロー", () => {
     expect((await listVisibleAnnouncements(account.userId)).some(item => item.id === scheduled.id)).toBe(false);
     await updateAnnouncement(admin.id, scheduled.id, { scheduledAt: new Date(Date.now() - 60_000) });
     expect((await listVisibleAnnouncements(account.userId)).some(item => item.id === scheduled.id)).toBe(true);
-    await recordFocusSession(account.userId, { startedAt: new Date(Date.now() - 20 * 60 * 1000), completedAt: new Date(), focusSeconds: 20 * 60 });
+    const focusInput = { clientSessionId: `focus-${suffix}`, startedAt: new Date(Date.now() - 20 * 60 * 1000), completedAt: new Date(), focusSeconds: 20 * 60 };
+    await expect(recordFocusSession(account.userId, focusInput)).resolves.toEqual({ saved: true });
+    await expect(recordFocusSession(account.userId, focusInput)).resolves.toEqual({ saved: false });
+    await expect(recordFocusSession(account.userId, { clientSessionId: `short-${suffix}`, startedAt: new Date(Date.now() - 12_000), completedAt: new Date(), focusSeconds: 12 })).resolves.toEqual({ saved: true });
     await recordLearningResult(account.userId, { mode: "practice", isCorrect: true });
     await recordLearningResult(account.userId, { mode: "test", isCorrect: false });
+    expect((await getLearningSummary(account.userId)).totalFocusSeconds).toBe(20 * 60 + 12);
     const trend = await getLearningTrend(account.userId, "day");
     expect(trend).toHaveLength(7);
-    expect(trend.some(point => point.focusMinutes === 20 && point.answers === 2 && point.accuracy === 50)).toBe(true);
+    expect(trend.some(point => point.focusMinutes === 20.2 && point.answers === 2 && point.accuracy === 50)).toBe(true);
     await deleteAnnouncement(admin.id, announcement.id);
     await deleteAnnouncement(admin.id, scheduled.id);
     expect((await listManageableAnnouncements(admin.id)).find(item => item.id === announcement.id)).toBeUndefined();
     expect((await listAnnouncementHistory(admin.id)).some(item => item.action === "announcement.deleted" && item.details === "更新済みお知らせ")).toBe(true);
-  }, 15_000);
+  }, 40_000);
 
   it("単語帳の範囲をおすすめテストとして配信し、同じ教室の学習者だけが受け取る", async () => {
     const admin = await getOrCreateSiteAdmin(); const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;

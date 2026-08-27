@@ -24,7 +24,7 @@ vi.mock("@/lib/trpc", () => ({
   },
 }));
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 
 import { CardsWorkspace } from "./CardsWorkspace";
 
@@ -75,6 +75,22 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.pointerMove(card, { pointerId: 1, clientX: 200 });
     fireEvent.pointerCancel(card, { pointerId: 1 });
     expect(screen.getByText("意味2")).toBeTruthy();
+  });
+  it("練習を途中で終了すると、現在位置と結果を再開用データとして渡す", () => {
+    const interrupted = vi.fn();
+    render(<CardsWorkspace books={books} onPracticeInterrupted={interrupted} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    fireEvent.click(screen.getByRole("button", { name: /覚えた/ }));
+    fireEvent.click(screen.getByRole("button", { name: "終了する" }));
+    expect(interrupted).toHaveBeenCalledWith(expect.objectContaining({ version: 1, subject: "英単語", index: 1, result: { known: 1, review: 0 }, words: expect.any(Array) }));
+    expect(screen.getByText("保存済みの学習セット")).toBeTruthy();
+  });
+  it("保存済みの練習は、回答済みカードを飛ばして途中の位置から再開する", () => {
+    render(<CardsWorkspace books={books} practiceResume={{ version: 1, subject: "英単語", words: [{ id: 101, front: "alpha", back: "最初" }, { id: 102, front: "beta", back: "次" }], index: 1, result: { known: 1, review: 0 }, missedWords: [], order: "normal", pool: "normal", savedAt: "2026-08-27T00:00:00.000Z" }} />);
+    expect(screen.getByText("次")).toBeTruthy();
+    expect(screen.getByText("練習 2 / 2")).toBeTruthy();
   });
   it("テストでは出題数に応じた制限時間を表示し、時間切れ後に未回答から再開できる", () => {
     vi.useFakeTimers();
