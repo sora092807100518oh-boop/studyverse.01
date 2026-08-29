@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const hooks = vi.hoisted(() => ({
   create: vi.fn().mockResolvedValue({ id: 1 }),
@@ -30,7 +30,7 @@ import { CardsWorkspace } from "./CardsWorkspace";
 
 const books = { 英単語: [{ id: "local", name: "ローカル教材", words: [{ front: "local", back: "ローカル" }] }], 漢字: [] };
 
-afterEach(() => { cleanup(); window.localStorage.clear(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); window.localStorage.clear(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 describe("保存学習セット方式の単語カード", () => {
   it("単語帳の範囲を学習セットとして保存できる", () => {
@@ -58,6 +58,35 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("練習 2 / 2")).toBeTruthy();
     expect(screen.getByText("次")).toBeTruthy();
+  });
+  it("英単語カードを裏返すと英語音声を再生する", async () => {
+    const speak = vi.fn();
+    const cancel = vi.fn();
+    vi.stubGlobal("SpeechSynthesisUtterance", class { text: string; lang = ""; rate = 1; pitch = 1; constructor(text: string) { this.text = text; } });
+    Object.defineProperty(window, "speechSynthesis", { configurable: true, value: { speak, cancel } });
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    fireEvent.click(screen.getByLabelText("単語カードをスワイプ"));
+    await waitFor(() => expect(speak).toHaveBeenCalledWith(expect.objectContaining({ text: "alpha", lang: "en-US" })));
+  });
+  it("練習設定で英単語音声をオフにすると反転しても再生しない", async () => {
+    const speak = vi.fn();
+    const cancel = vi.fn();
+    vi.stubGlobal("SpeechSynthesisUtterance", class { text: string; constructor(text: string) { this.text = text; } });
+    Object.defineProperty(window, "speechSynthesis", { configurable: true, value: { speak, cancel } });
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    const voiceSwitch = screen.getByRole("switch", { name: /英単語の音声/ });
+    expect(voiceSwitch.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(voiceSwitch);
+    expect(voiceSwitch.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    fireEvent.click(screen.getByLabelText("単語カードをスワイプ"));
+    await act(async () => {});
+    expect(speak).not.toHaveBeenCalled();
   });
   it("先生配信テストを開始できる", () => {
     render(<CardsWorkspace books={books} />);
