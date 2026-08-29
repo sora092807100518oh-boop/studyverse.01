@@ -47,6 +47,24 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("最初")).toBeTruthy();
   });
+  it("練習設定で問答方向を選ぶと、カードの最初の表示が切り替わる", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText(/英語第1章 第1〜20語/));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    expect((screen.getByLabelText("最初に出す方") as HTMLSelectElement).value).toBe("question");
+    fireEvent.change(screen.getByLabelText("最初に出す方"), { target: { value: "answer" } });
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    expect(screen.getByText("alpha")).toBeTruthy();
+  });
+  it("テスト設定でも問答方向を選択できる", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText(/英語第1章 第1〜20語/));
+    fireEvent.click(screen.getByRole("button", { name: /テスト/ }));
+    expect((screen.getByLabelText("最初に出す方") as HTMLSelectElement).value).toBe("question");
+    fireEvent.change(screen.getByLabelText("最初に出す方"), { target: { value: "answer" } });
+    fireEvent.click(screen.getByRole("button", { name: /この設定でテストを始める/ }));
+    expect(screen.getByText("alpha")).toBeTruthy();
+  });
   it("練習設定の続きからをオンにすると、保存された途中のカードから再開する", () => {
     window.localStorage.setItem("studyverse-practice-continue", JSON.stringify({ version: 1, subject: "英単語", words: [{ id: 101, front: "alpha", back: "最初" }, { id: 102, front: "beta", back: "次" }], index: 1, result: { known: 1, review: 0 }, missedWords: [], order: "normal", pool: "normal", savedAt: "2026-08-27T00:00:00.000Z" }));
     render(<CardsWorkspace books={books} />);
