@@ -13,9 +13,9 @@ const hooks = vi.hoisted(() => ({
 vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({ studySets: { list: { invalidate: hooks.invalidate } }, wordbooks: { list: { invalidate: hooks.invalidate } } }),
-    wordbooks: { list: { useQuery: () => ({ data: [{ id: 10, title: "英語第1章", words: [{ id: 101, front: "alpha", back: "最初", reading: null }, { id: 102, front: "beta", back: "次", reading: null }] }] }) } },
+    wordbooks: { list: { useQuery: (input: { subject?: string }) => ({ data: input.subject === "kanji" ? [{ id: 11, title: "漢字第1章", words: [{ id: 301, front: "学", back: "まなぶ", reading: "まなぶ" }] }] : [{ id: 10, title: "英語第1章", words: [{ id: 101, front: "alpha", back: "最初", reading: null }, { id: 102, front: "beta", back: "次", reading: null }] }] }) } },
     studySets: {
-      list: { useQuery: () => ({ data: [{ id: 1, label: "英語第1章 第1〜20語", subject: "english", words: Array.from({ length: 20 }, (_, index) => ({ id: 101 + index, front: index === 0 ? "alpha" : `word-${index + 1}`, back: index === 0 ? "最初" : `意味${index + 1}`, reading: null })) }] }) },
+      list: { useQuery: () => ({ data: [{ id: 1, label: "英語第1章 第1〜20語", subject: "english", words: Array.from({ length: 20 }, (_, index) => ({ id: 101 + index, front: index === 0 ? "alpha" : `word-${index + 1}`, back: index === 0 ? "最初" : `意味${index + 1}`, reading: null })) }, { id: 2, label: "漢字第1章", subject: "kanji", words: [{ id: 301, front: "学", back: "まなぶ", reading: "まなぶ" }] }] }) },
       create: { useMutation: () => ({ mutateAsync: hooks.create }) },
       delete: { useMutation: () => ({ mutateAsync: hooks.remove }) },
     },
@@ -87,6 +87,13 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByLabelText("単語カードをスワイプ"));
     await act(async () => {});
     expect(speak).not.toHaveBeenCalled();
+  });
+  it("漢字の練習設定には英単語の音声切替を表示しない", () => {
+    render(<CardsWorkspace books={{ ...books, 漢字: [{ id: "kanji", name: "漢字教材", words: [{ front: "学", back: "まなぶ" }] }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: "漢字" }));
+    fireEvent.click(screen.getByText("漢字第1章"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    expect(screen.queryByRole("switch", { name: /英単語の音声/ })).toBeNull();
   });
   it("先生配信テストを開始できる", () => {
     render(<CardsWorkspace books={books} />);
