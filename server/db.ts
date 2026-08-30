@@ -716,42 +716,45 @@ export async function deleteWordbook(userId: number, wordbookId: number) {
   await writeActivity({ actorUserId: userId, classroomId: book.classroomId ?? undefined, category: "classroom", action: "wordbook.deleted", details: book.title });
 }
 
-export async function recordLearningResult(userId: number, input: { wordId?: number; mode: "practice" | "test" | "journal" | "ai_select"; isCorrect: boolean }) {
+export type PracticeRating = "known" | "review" | "instant" | "slow";
+
+export async function recordLearningResult(userId: number, input: { wordId?: number; mode: "practice" | "test" | "journal" | "ai_select"; isCorrect: boolean; practiceRating?: PracticeRating }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const profile = await getProfile(userId);
   if (!profile) throw new Error("CLASSROOM_REQUIRED");
-  await db.insert(studyRecords).values({ userId, classroomId: profile.profile.classroomId, wordId: input.wordId ?? null, mode: input.mode, isCorrect: input.isCorrect });
+  const practiceRating = input.practiceRating ?? (input.isCorrect ? "known" : "review");
+  await db.insert(studyRecords).values({ userId, classroomId: profile.profile.classroomId, wordId: input.wordId ?? null, mode: input.mode, isCorrect: input.isCorrect, practiceRating });
   await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "learning", action: `answer.${input.mode}`, details: input.isCorrect ? "correct" : "review" });
 }
 
 export async function listReviewWords(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  const records = await db.select({ id: studyRecords.id, wordId: studyRecords.wordId, isCorrect: studyRecords.isCorrect, answeredAt: studyRecords.answeredAt }).from(studyRecords).where(and(eq(studyRecords.userId, userId), isNotNull(studyRecords.wordId))).orderBy(desc(studyRecords.answeredAt), desc(studyRecords.id)).limit(300);
-  const latestByWord = new Map<number, { isCorrect: boolean; answeredAt: Date }>();
-  for (const record of records) if (record.wordId !== null && !latestByWord.has(record.wordId)) latestByWord.set(record.wordId, { isCorrect: record.isCorrect, answeredAt: record.answeredAt });
-  const reviewIds = Array.from(latestByWord.entries()).filter(([, latest]) => !latest.isCorrect).map(([wordId]) => wordId);
+  const records = await db.select({ id: studyRecords.id, wordId: studyRecords.wordId, isCorrect: studyRecords.isCorrect, practiceRating: studyRecords.practiceRating, answeredAt: studyRecords.answeredAt }).from(studyRecords).where(and(eq(studyRecords.userId, userId), isNotNull(studyRecords.wordId))).orderBy(desc(studyRecords.answeredAt), desc(studyRecords.id)).limit(300);
+  const latestByWord = new Map<number, { isCorrect: boolean; practiceRating: PracticeRating; answeredAt: Date }>();
+  for (const record of records) if (record.wordId !== null && !latestByWord.has(record.wordId)) latestByWord.set(record.wordId, { isCorrect: record.isCorrect, practiceRating: record.practiceRating, answeredAt: record.answeredAt });
+  const reviewIds = Array.from(latestByWord.entries()).filter(([, latest]) => !latest.isCorrect || latest.practiceRating === "review" || latest.practiceRating === "slow").map(([wordId]) => wordId);
   if (!reviewIds.length) return [];
   const words = await db.select().from(vocabularyWords).where(inArray(vocabularyWords.id, reviewIds));
-  return words.map(word => ({ ...word, missedAt: latestByWord.get(word.id)?.answeredAt ?? new Date(0) }));
+  return words.map(word => ({ ...word, practiceRating: latestByWord.get(word.id)?.practiceRating ?? "review", missedAt: latestByWord.get(word.id)?.answeredAt ?? new Date(0) }));
 }
 
 export async function getLearningDashboard(userId: number) {
   const db = await getDb();
-  if (!db) return { wordbooks: [], reviewWords: [], unstartedSets: [] };
+  if (!db) return { wordbooks: [], reviewWords: [], unstartedSets: [], mistakeCounts: [], practiceRatings: [] };
   const [books, sets, records] = await Promise.all([
     listVisibleWordbooks(userId),
     listSavedStudySets(userId),
-    db.select({ id: studyRecords.id, wordId: studyRecords.wordId, isCorrect: studyRecords.isCorrect, answeredAt: studyRecords.answeredAt }).from(studyRecords).where(and(eq(studyRecords.userId, userId), isNotNull(studyRecords.wordId))).orderBy(desc(studyRecords.answeredAt), desc(studyRecords.id)).limit(1_000),
+    db.select({ id: studyRecords.id, wordId: studyRecords.wordId, isCorrect: studyRecords.isCorrect, practiceRating: studyRecords.practiceRating, answeredAt: studyRecords.answeredAt }).from(studyRecords).where(and(eq(studyRecords.userId, userId), isNotNull(studyRecords.wordId))).orderBy(desc(studyRecords.answeredAt), desc(studyRecords.id)).limit(1_000),
   ]);
-  const latestByWord = new Map<number, { isCorrect: boolean; answeredAt: Date }>();
-  const attemptsByWord = new Map<number, Array<{ isCorrect: boolean }>>();
+  const latestByWord = new Map<number, { isCorrect: boolean; practiceRating: PracticeRating; answeredAt: Date }>();
+  const attemptsByWord = new Map<number, Array<{ isCorrect: boolean; practiceRating: PracticeRating }>>();
   for (const record of records) {
     if (record.wordId === null) continue;
-    if (!latestByWord.has(record.wordId)) latestByWord.set(record.wordId, { isCorrect: record.isCorrect, answeredAt: record.answeredAt });
+    if (!latestByWord.has(record.wordId)) latestByWord.set(record.wordId, { isCorrect: record.isCorrect, practiceRating: record.practiceRating, answeredAt: record.answeredAt });
     const attempts = attemptsByWord.get(record.wordId) ?? [];
-    attempts.push({ isCorrect: record.isCorrect });
+    attempts.push({ isCorrect: record.isCorrect, practiceRating: record.practiceRating });
     attemptsByWord.set(record.wordId, attempts);
   }
   const wordsById = new Map(books.flatMap(book => book.words.map(word => [word.id, { ...word, wordbookId: book.id, wordbookTitle: book.title }] as const)));
@@ -763,13 +766,14 @@ export async function getLearningDashboard(userId: number) {
     const correctAttempts = attempts.filter(attempt => attempt.isCorrect).length;
     return { id: book.id, title: book.title, subject: book.subject, visibility: book.visibility, wordCount: wordIds.length, studiedWordCount, masteredWordCount, progressPercent: wordIds.length ? Math.round((masteredWordCount / wordIds.length) * 100) : 0, accuracyPercent: attempts.length ? Math.round((correctAttempts / attempts.length) * 100) : 0 };
   });
-  const reviewWords = Array.from(latestByWord.entries()).filter(([, latest]) => !latest.isCorrect).map(([wordId, latest]) => {
+  const reviewWords = Array.from(latestByWord.entries()).filter(([, latest]) => !latest.isCorrect || latest.practiceRating === "review" || latest.practiceRating === "slow").map(([wordId, latest]) => {
     const word = wordsById.get(wordId);
-    return word ? { ...word, missedAt: latest.answeredAt } : null;
+    return word ? { ...word, practiceRating: latest.practiceRating, missedAt: latest.answeredAt } : null;
   }).filter((word): word is NonNullable<typeof word> => Boolean(word)).slice(0, 5);
   const unstartedSets = sets.filter(set => set.words.length > 0 && set.words.every(word => !latestByWord.has(word.id))).slice(0, 3).map(set => ({ id: set.id, label: set.label, wordbookId: set.wordbookId, wordbookTitle: set.wordbookTitle, wordCount: set.words.length }));
-  const mistakeCounts = Array.from(attemptsByWord.entries()).map(([wordId, attempts]) => ({ wordId, mistakeCount: attempts.filter(attempt => !attempt.isCorrect).length })).filter(item => item.mistakeCount > 0);
-  return { wordbooks, reviewWords, unstartedSets, mistakeCounts };
+  const mistakeCounts = Array.from(attemptsByWord.entries()).map(([wordId, attempts]) => ({ wordId, mistakeCount: attempts.filter(attempt => !attempt.isCorrect || attempt.practiceRating === "review" || attempt.practiceRating === "slow").length })).filter(item => item.mistakeCount > 0);
+  const practiceRatings = Array.from(latestByWord.entries()).map(([wordId, latest]) => ({ wordId, rating: latest.practiceRating }));
+  return { wordbooks, reviewWords, unstartedSets, mistakeCounts, practiceRatings };
 }
 
 export async function recordFocusSession(userId: number, input: { clientSessionId: string; startedAt: Date; completedAt: Date; focusSeconds: number }) {

@@ -20,7 +20,7 @@ vi.mock("@/lib/trpc", () => ({
       delete: { useMutation: () => ({ mutateAsync: hooks.remove }) },
     },
     classroom: { recommendedTests: { list: { useQuery: () => ({ data: [{ id: 5, wordbookTitle: "配信教材", subject: "english", rangeStart: 2, rangeEnd: 2, questionCount: 1, words: [{ id: 202, front: "gamma", back: "三番目", reading: null }] }] }) } } },
-    learning: { review: { useQuery: () => ({ data: [], refetch: hooks.reviewRefetch }) }, dashboard: { useQuery: () => ({ data: { mistakeCounts: [] }, refetch: hooks.reviewRefetch }) }, recordAnswer: { useMutation: () => ({ mutateAsync: hooks.recordAnswer }) } },
+    learning: { review: { useQuery: () => ({ data: [], refetch: hooks.reviewRefetch }) }, dashboard: { useQuery: () => ({ data: { mistakeCounts: [], practiceRatings: [{ wordId: 101, rating: "instant" }, { wordId: 102, rating: "slow" }] }, refetch: hooks.reviewRefetch }) }, recordAnswer: { useMutation: () => ({ mutateAsync: hooks.recordAnswer }) } },
   },
 }));
 
@@ -131,6 +131,47 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.pointerUp(card, { pointerId: 1, clientX: 220 });
     expect(screen.getByText("意味2")).toBeTruthy();
   });
+  it("上方向のスワイプを瞬答として保存し、二重丸マークを表示する", async () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    const card = screen.getByLabelText("単語カードをスワイプ");
+    fireEvent.pointerDown(card, { pointerId: 2, clientX: 100, clientY: 300 });
+    fireEvent.pointerMove(card, { pointerId: 2, clientX: 105, clientY: 170 });
+    expect(screen.getByText("◎")).toBeTruthy();
+    fireEvent.pointerUp(card, { pointerId: 2, clientX: 105, clientY: 170 });
+    expect(screen.getByText("意味2")).toBeTruthy();
+    await waitFor(() => expect(hooks.recordAnswer).toHaveBeenCalledWith(expect.objectContaining({ practiceRating: "instant", isCorrect: true })));
+  });
+  it("下方向のスワイプを遅答として復習対象に保存する", async () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    const card = screen.getByLabelText("単語カードをスワイプ");
+    fireEvent.pointerDown(card, { pointerId: 3, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(card, { pointerId: 3, clientX: 105, clientY: 230 });
+    fireEvent.pointerUp(card, { pointerId: 3, clientX: 105, clientY: 230 });
+    expect(screen.getByText("意味2")).toBeTruthy();
+    await waitFor(() => expect(hooks.recordAnswer).toHaveBeenCalledWith(expect.objectContaining({ practiceRating: "slow", isCorrect: true })));
+  });
+  it("判定メーターから単語を開いて再練習すると学習記録を追加しない", async () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    expect(screen.getByText("判定メーター")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /瞬答/ }));
+    expect(screen.getByText("alpha")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "練習モード" }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    const card = screen.getByLabelText("単語カードをスワイプ");
+    fireEvent.pointerDown(card, { pointerId: 4, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(card, { pointerId: 4, clientX: 220, clientY: 100 });
+    fireEvent.pointerUp(card, { pointerId: 4, clientX: 220, clientY: 100 });
+    await act(async () => {});
+    expect(hooks.recordAnswer).not.toHaveBeenCalled();
+  });
   it("ポインターが取り消されても、移動済みのカードは次のカードへ進む", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
@@ -181,9 +222,9 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.change(screen.getByPlaceholderText("答えを入力"), { target: { value: "wrong" } });
     fireEvent.click(screen.getByRole("button", { name: "答えを確認する" }));
     fireEvent.click(screen.getByRole("button", { name: "復習に入れる" }));
-    expect(screen.getByText("誤答一覧（1問）")).toBeTruthy();
+    expect(screen.getByText("復習対象一覧（1問）")).toBeTruthy();
     expect(screen.getByText("答え：gamma")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "誤答だけをもう一度テストする" }));
+    fireEvent.click(screen.getByRole("button", { name: "復習対象だけをもう一度テストする" }));
     expect(screen.getByText(/テスト 1 \/ 1/)).toBeTruthy();
   });
 });

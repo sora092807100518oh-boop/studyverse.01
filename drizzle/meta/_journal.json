@@ -113,6 +113,13 @@
       "when": 1787829797363,
       "tag": "0015_breezy_wolfpack",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "5",
+      "when": 1788051734206,
+      "tag": "0016_curly_wallop",
+      "breakpoints": true
     }
   ]
 }

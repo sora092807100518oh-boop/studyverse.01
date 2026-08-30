@@ -142,7 +142,7 @@ export const appRouter = router({
     saveFocusSession: protectedProcedure.input(z.object({ clientSessionId: z.string().trim().min(8).max(96), startedAt: z.date(), completedAt: z.date(), focusSeconds: z.number().int().min(1).max(4 * 60 * 60) })).mutation(async ({ ctx, input }) => {
       try { const result = await recordFocusSession(ctx.user.id, input); return { success: true, ...result }; } catch (error) { return toUserMessage(error); }
     }),
-    recordAnswer: protectedProcedure.input(z.object({ wordId: z.number().int().positive().optional(), mode: z.enum(["practice", "test", "journal", "ai_select"]), isCorrect: z.boolean() })).mutation(async ({ ctx, input }) => {
+    recordAnswer: protectedProcedure.input(z.object({ wordId: z.number().int().positive().optional(), mode: z.enum(["practice", "test", "journal", "ai_select"]), isCorrect: z.boolean(), practiceRating: z.enum(["known", "review", "instant", "slow"]).optional() })).mutation(async ({ ctx, input }) => {
       try { await recordLearningResult(ctx.user.id, input); return { success: true }; } catch (error) { return toUserMessage(error); }
     }),
     completeAiSelect: protectedProcedure.input(z.object({ subject: z.enum(["english", "kanji"]) })).mutation(async ({ ctx, input }) => {

@@ -118,6 +118,7 @@ export const studyRecords = mysqlTable("studyRecords", {
   wordId: int("wordId"),
   mode: mysqlEnum("mode", ["practice", "test", "journal", "ai_select"]).notNull(),
   isCorrect: boolean("isCorrect").notNull(),
+  practiceRating: mysqlEnum("practiceRating", ["known", "review", "instant", "slow"]).default("known").notNull(),
   answeredAt: timestamp("answeredAt").defaultNow().notNull(),
 });
 

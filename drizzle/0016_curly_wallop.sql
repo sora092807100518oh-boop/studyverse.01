@@ -1,0 +1,1 @@
+ALTER TABLE `studyRecords` ADD `practiceRating` enum('known','review','instant','slow') DEFAULT 'known' NOT NULL;
