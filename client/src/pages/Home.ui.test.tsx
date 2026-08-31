@@ -126,6 +126,16 @@ describe("学習プロフィール", () => {
     expect(screen.getByText("ユーザーネーム")).toBeTruthy();
     expect(screen.getByTestId("profile-username").textContent).toBe("学習者の名前");
   });
+
+  it("表示名保存時に親画面の保持コールバックへ最新値を渡す", async () => {
+    const onDisplayNameSaved = vi.fn();
+    hooks.mutateAsync.mockResolvedValueOnce({ displayName: "新しい表示名" });
+    render(<ProfileControls currentDisplayName="古い表示名" onDisplayNameSaved={onDisplayNameSaved} />);
+    fireEvent.change(screen.getByPlaceholderText("表示名"), { target: { value: "新しい表示名" } });
+    fireEvent.click(screen.getByRole("button", { name: "名前を保存" }));
+    await waitFor(() => expect(onDisplayNameSaved).toHaveBeenCalledWith("新しい表示名"));
+    expect(screen.getByTestId("profile-username").textContent).toBe("新しい表示名");
+  });
 });
 
 describe("集中時間の即時表示", () => {
