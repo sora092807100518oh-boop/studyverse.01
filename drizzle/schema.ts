@@ -111,6 +111,26 @@ export const vocabularyWords = mysqlTable("vocabularyWords", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const smartNotificationSettings = mysqlTable("smartNotificationSettings", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull().unique(),
+  wordbookId: int("wordbookId").notNull(),
+  direction: mysqlEnum("direction", ["question", "answer"]).default("question").notNull(),
+  enabled: boolean("enabled").default(false).notNull(),
+  scheduleCronTaskUid: varchar("scheduleCronTaskUid", { length: 65 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const smartNotificationSubscriptions = mysqlTable("smartNotificationSubscriptions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  endpoint: varchar("endpoint", { length: 2048 }).notNull().unique(),
+  subscriptionJson: text("subscriptionJson").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
 export const studyRecords = mysqlTable("studyRecords", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),

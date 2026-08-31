@@ -1,7 +1,8 @@
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import webpush from "web-push";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -1043,4 +1044,61 @@ export async function resetRevivalTickets(actorUserId: number, profileId: number
   await db.update(studentProfiles).set({ revivalTickets: 2 }).where(eq(studentProfiles.id, profileId));
   await writeActivity({ actorUserId, classroomId: target[0].classroomId, category: "member", action: "revival_tickets.reset", details: `profile:${profileId}` });
   return { revivalTickets: 2 };
+}
+
+
+export type SmartNotificationDirection = "question" | "answer";
+
+export async function getSmartNotificationSettings(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const rows = await db.select().from(smartNotificationSettings).where(eq(smartNotificationSettings.userId, userId)).limit(1);
+  return rows[0] ?? null;
+}
+
+export async function saveSmartNotificationSettings(userId: number, input: { wordbookId: number; direction: SmartNotificationDirection; enabled: boolean }) {
+  const visibleBooks = await listVisibleWordbooks(userId);
+  if (!visibleBooks.some(book => book.id === input.wordbookId)) throw new Error("SMART_NOTIFICATION_WORDBOOK_FORBIDDEN");
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const values = { userId, wordbookId: input.wordbookId, direction: input.direction, enabled: input.enabled } as const;
+  await db.insert(smartNotificationSettings).values(values).onDuplicateKeyUpdate({ set: { wordbookId: input.wordbookId, direction: input.direction, enabled: input.enabled, updatedAt: new Date() } });
+  return getSmartNotificationSettings(userId);
+}
+
+export async function saveSmartNotificationSubscription(userId: number, subscription: { endpoint: string; keys?: Record<string, string> }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await db.insert(smartNotificationSubscriptions).values({ userId, endpoint: subscription.endpoint, subscriptionJson: JSON.stringify(subscription) }).onDuplicateKeyUpdate({ set: { userId, subscriptionJson: JSON.stringify(subscription), updatedAt: new Date() } });
+  return { success: true } as const;
+}
+
+export async function setSmartNotificationTaskUid(userId: number, taskUid: string | null) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await db.update(smartNotificationSettings).set({ scheduleCronTaskUid: taskUid, updatedAt: new Date() }).where(eq(smartNotificationSettings.userId, userId));
+}
+
+export async function sendSmartNotification(taskUid: string) {
+  const db = await getDb();
+  if (!db) return { sent: 0, skipped: "database" } as const;
+  const settings = (await db.select().from(smartNotificationSettings).where(eq(smartNotificationSettings.scheduleCronTaskUid, taskUid)).limit(1))[0];
+  if (!settings || !settings.enabled) return { sent: 0, skipped: "disabled" } as const;
+  const books = await listVisibleWordbooks(settings.userId);
+  const book = books.find(item => item.id === settings.wordbookId);
+  if (!book || !book.words.length) return { sent: 0, skipped: "empty" } as const;
+  const word = book.words[Math.floor(Math.random() * book.words.length)];
+  webpush.setVapidDetails(ENV.vapidSubject, ENV.vapidPublicKey, ENV.vapidPrivateKey);
+  const subscriptions = await db.select().from(smartNotificationSubscriptions).where(eq(smartNotificationSubscriptions.userId, settings.userId));
+  const payload = JSON.stringify({ title: `StudyVerse｜${book.title}`, body: settings.direction === "question" ? word.front : word.back, answer: settings.direction === "question" ? word.back : word.front, direction: settings.direction, wordId: word.id, tag: `smart-${word.id}` });
+  let sent = 0;
+  for (const subscription of subscriptions) {
+    try { await webpush.sendNotification(JSON.parse(subscription.subscriptionJson), payload); sent += 1; }
+    catch (error) {
+      const statusCode = (error as { statusCode?: number }).statusCode;
+      if (statusCode === 404 || statusCode === 410) await db.delete(smartNotificationSubscriptions).where(eq(smartNotificationSubscriptions.id, subscription.id));
+      else console.warn("[SmartNotification] send failed", error);
+    }
+  }
+  return { sent, wordId: word.id } as const;
 }

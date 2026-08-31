@@ -1,9 +1,11 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
+import { addWordToWordbook, authenticateWithPin, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
 import { deleteSavedStudySet, getCalendarDashboard, listSavedStudySets, resetRevivalTickets, saveStudySet, updateOwnDisplayName, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
+import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
+import { ENV } from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 
@@ -52,6 +54,26 @@ export const appRouter = router({
   calendar: router({
     dashboard: protectedProcedure.query(async ({ ctx }) => getCalendarDashboard(ctx.user.id)),
     useRevivalTicket: protectedProcedure.input(z.object({ dateKey: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) })).mutation(async ({ ctx, input }) => { try { await useRevivalTicket(ctx.user.id, input.dateKey); return { success: true }; } catch (error) { return toUserMessage(error); } }),
+  }),
+  smartNotifications: router({
+    publicKey: protectedProcedure.query(() => ({ publicKey: ENV.vapidPublicKey })),
+    settings: protectedProcedure.query(async ({ ctx }) => getSmartNotificationSettings(ctx.user.id)),
+    subscribe: protectedProcedure.input(z.object({ endpoint: z.string().url().max(2048), keys: z.record(z.string(), z.string()).optional() })).mutation(async ({ ctx, input }) => { try { return await saveSmartNotificationSubscription(ctx.user.id, input); } catch (error) { return toUserMessage(error); } }),
+    save: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), direction: z.enum(["question", "answer"]), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+      try {
+        const current = await getSmartNotificationSettings(ctx.user.id);
+        const saved = await saveSmartNotificationSettings(ctx.user.id, input);
+        const sessionToken = getRequestCookie(ctx.req.headers.cookie, "app_session_id") ?? "";
+        if (input.enabled) {
+          if (current?.scheduleCronTaskUid) await updateHeartbeatJob(current.scheduleCronTaskUid, { enable: true, cron: "0 * * * * *", path: "/api/scheduled/smart-notifications" }, sessionToken);
+          else {
+            const job = await createHeartbeatJob({ name: `smart-notifications-${ctx.user.id}`, cron: "0 * * * * *", path: "/api/scheduled/smart-notifications", description: "StudyVerse smart notification learning" }, sessionToken);
+            await setSmartNotificationTaskUid(ctx.user.id, job.taskUid);
+          }
+        } else if (current?.scheduleCronTaskUid) await updateHeartbeatJob(current.scheduleCronTaskUid, { enable: false }, sessionToken);
+        return getSmartNotificationSettings(ctx.user.id);
+      } catch (error) { return toUserMessage(error); }
+    }),
   }),
   system: systemRouter,
   siteAdmin: router({

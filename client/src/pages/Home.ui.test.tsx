@@ -177,7 +177,7 @@ describe("カード回答の記録UI", () => {
     hooks.mutateAsync.mockRejectedValueOnce(new Error("保存に失敗しました"));
     render(<CardsView books={books} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "漢字" }));
+    fireEvent.click(screen.getByRole("button", { name: "その他" }));
     fireEvent.click(screen.getByRole("button", { name: /^テスト/ }));
     fireEvent.click(screen.getByRole("button", { name: "答えを確認する" }));
     fireEvent.click(screen.getByRole("button", { name: "次の問題" }));

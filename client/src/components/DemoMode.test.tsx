@@ -19,7 +19,7 @@ describe("お試しモード", () => {
     expect(screen.queryByText("管理画面")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "単語帳" }));
     expect(screen.getByText("お試し英単語帳")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "漢字" }));
+    fireEvent.click(screen.getByRole("button", { name: "その他" }));
     expect(screen.getByText("お試し漢字単語帳")).toBeTruthy();
     expect(screen.getAllByText("学習専用")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "単語カード" }));

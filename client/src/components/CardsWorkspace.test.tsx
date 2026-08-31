@@ -153,7 +153,7 @@ describe("保存学習セット方式の単語カード", () => {
   });
   it("漢字の練習設定には英単語の音声切替を表示しない", () => {
     render(<CardsWorkspace books={{ ...books, 漢字: [{ id: "kanji", name: "漢字教材", words: [{ front: "学", back: "まなぶ" }] }] }} />);
-    fireEvent.click(screen.getByRole("button", { name: "漢字" }));
+    fireEvent.click(screen.getByRole("button", { name: "その他" }));
     fireEvent.click(screen.getByText("漢字第1章"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
     expect(screen.queryByRole("switch", { name: /英単語の音声/ })).toBeNull();
