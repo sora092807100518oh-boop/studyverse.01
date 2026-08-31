@@ -47,6 +47,51 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("最初")).toBeTruthy();
   });
+  it("特訓モードは初期状態がオフで、右・上判定済みカードを出題しない", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    const trainingSwitch = screen.getByRole("switch", { name: "特訓モード" });
+    expect(trainingSwitch.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(trainingSwitch);
+    expect(trainingSwitch.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    expect(screen.getByText("意味2")).toBeTruthy();
+    expect(screen.queryByText("最初")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /覚えた/ }));
+    expect(screen.getByText("意味3")).toBeTruthy();
+  });
+  it("特訓モードは右判定で最後の未達成カードを完了扱いにする", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /△ 遅答/ }));
+    fireEvent.click(screen.getByRole("button", { name: /練習モード/ }));
+    fireEvent.click(screen.getByRole("switch", { name: "特訓モード" }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    fireEvent.click(screen.getByRole("button", { name: /覚えた/ }));
+    expect(screen.getByText("学習を記録しました")).toBeTruthy();
+  });
+  it("特訓モードで左・下判定を選ぶと同じ未達成カードを再出題する", async () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("switch", { name: "特訓モード" }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    fireEvent.click(screen.getByRole("button", { name: /遅答/ }));
+    expect(screen.getByText("意味2")).toBeTruthy();
+    expect(screen.queryByText("学習を記録しました")).toBeNull();
+    await waitFor(() => expect(hooks.recordAnswer).toHaveBeenCalledWith(expect.objectContaining({ practiceRating: "slow" })));
+  });
+  it("特訓モードの途中再開データに設定を保存する", async () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("switch", { name: "特訓モード" }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    fireEvent.click(screen.getByRole("button", { name: /終了する/ }));
+    await waitFor(() => expect(JSON.parse(window.localStorage.getItem("studyverse-practice-continue") ?? "{}").training).toBe(true));
+  });
   it("練習設定で問答方向を選ぶと、カードの最初の表示が切り替わる", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText(/英語第1章 第1〜20語/));
