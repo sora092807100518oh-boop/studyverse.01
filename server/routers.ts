@@ -65,9 +65,9 @@ export const appRouter = router({
         const saved = await saveSmartNotificationSettings(ctx.user.id, input);
         const sessionToken = getRequestCookie(ctx.req.headers.cookie, "app_session_id") ?? "";
         if (input.enabled) {
-          if (current?.scheduleCronTaskUid) await updateHeartbeatJob(current.scheduleCronTaskUid, { enable: true, cron: "0 * * * * *", path: "/api/scheduled/smart-notifications" }, sessionToken);
+          if (current?.scheduleCronTaskUid) await updateHeartbeatJob(current.scheduleCronTaskUid, { enable: true, cron: "0 0 * * * *", path: "/api/scheduled/smart-notifications" }, sessionToken);
           else {
-            const job = await createHeartbeatJob({ name: `smart-notifications-${ctx.user.id}`, cron: "0 * * * * *", path: "/api/scheduled/smart-notifications", description: "StudyVerse smart notification learning" }, sessionToken);
+            const job = await createHeartbeatJob({ name: `smart-notifications-${ctx.user.id}`, cron: "0 0 * * * *", path: "/api/scheduled/smart-notifications", description: "StudyVerse smart notification learning" }, sessionToken);
             await setSmartNotificationTaskUid(ctx.user.id, job.taskUid);
           }
         } else if (current?.scheduleCronTaskUid) await updateHeartbeatJob(current.scheduleCronTaskUid, { enable: false }, sessionToken);

@@ -7,6 +7,7 @@ import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { sendSmartNotification } from "../db";
+import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
 
 function isPortAvailable(port: number): Promise<boolean> {
@@ -37,9 +38,9 @@ async function startServer() {
   registerStorageProxy(app);
   app.post("/api/scheduled/smart-notifications", async (req, res) => {
     try {
-      const taskUid = req.header("x-manus-task-uid") ?? req.header("x-task-uid");
-      if (!taskUid) return res.status(403).json({ error: "cron-only" });
-      return res.json(await sendSmartNotification(taskUid));
+      const user = await sdk.authenticateRequest(req);
+      if (!user.isCron || !user.taskUid) return res.status(403).json({ error: "cron-only" });
+      return res.json(await sendSmartNotification(user.taskUid));
     } catch (error) {
       return res.status(500).json({ error: String(error), timestamp: new Date().toISOString() });
     }
