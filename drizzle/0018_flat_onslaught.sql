@@ -1,0 +1,2 @@
+ALTER TABLE `smartNotificationSettings` ADD `startTime` varchar(5) DEFAULT '08:00' NOT NULL;--> statement-breakpoint
+ALTER TABLE `smartNotificationSettings` ADD `endTime` varchar(5) DEFAULT '21:00' NOT NULL;

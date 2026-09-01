@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
+import { addWordToWordbook, authenticateWithPin, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
 import { deleteSavedStudySet, getCalendarDashboard, listSavedStudySets, resetRevivalTickets, saveStudySet, updateOwnDisplayName, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -59,7 +59,7 @@ export const appRouter = router({
     publicKey: protectedProcedure.query(() => ({ publicKey: ENV.vapidPublicKey })),
     settings: protectedProcedure.query(async ({ ctx }) => getSmartNotificationSettings(ctx.user.id)),
     subscribe: protectedProcedure.input(z.object({ endpoint: z.string().url().max(2048), keys: z.record(z.string(), z.string()).optional() })).mutation(async ({ ctx, input }) => { try { return await saveSmartNotificationSubscription(ctx.user.id, input); } catch (error) { return toUserMessage(error); } }),
-    save: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), direction: z.enum(["question", "answer"]), enabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+    save: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), direction: z.enum(["question", "answer"]), enabled: z.boolean(), startTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/), endTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/) })).mutation(async ({ ctx, input }) => {
       try {
         const current = await getSmartNotificationSettings(ctx.user.id);
         const saved = await saveSmartNotificationSettings(ctx.user.id, input);
@@ -73,6 +73,9 @@ export const appRouter = router({
         } else if (current?.scheduleCronTaskUid) await updateHeartbeatJob(current.scheduleCronTaskUid, { enable: false }, sessionToken);
         return getSmartNotificationSettings(ctx.user.id);
       } catch (error) { return toUserMessage(error); }
+    }),
+    sendTest: protectedProcedure.mutation(async ({ ctx }) => {
+      try { return await sendSmartNotificationNow(ctx.user.id); } catch (error) { return toUserMessage(error); }
     }),
   }),
   system: systemRouter,

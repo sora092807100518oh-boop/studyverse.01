@@ -23,7 +23,15 @@ vi.mock("@/lib/trpc", () => ({
     profile: { updateName: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) } },
     monster: { dashboard: { useQuery: () => ({ data: { eggs: [] } }) } },
     calendar: { dashboard: { useQuery: () => ({ data: { revivalTickets: 2 } }) } },
+    smartNotifications: {
+      settings: { useQuery: () => ({ data: { wordbookId: 1, direction: "question" as const, enabled: true, startTime: "08:00", endTime: "21:00" } }) },
+      publicKey: { useQuery: () => ({ data: { publicKey: "test-public-key" } }) },
+      subscribe: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ success: true }), isPending: false }) },
+      save: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ success: true }), isPending: false }) },
+      sendTest: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ sent: 1 }), isPending: false }) },
+    },
     wordbooks: {
+      list: { useQuery: () => ({ data: [{ id: 1, title: "英語テスト", subject: "english" }], isLoading: false }) },
       addWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
       updateWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
       deleteWord: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
@@ -135,6 +143,14 @@ describe("学習プロフィール", () => {
     fireEvent.click(screen.getByRole("button", { name: "名前を保存" }));
     await waitFor(() => expect(onDisplayNameSaved).toHaveBeenCalledWith("新しい表示名"));
     expect(screen.getByTestId("profile-username").textContent).toBe("新しい表示名");
+  });
+
+  it("通知時間帯を表示し、今すぐ通知ボタンでテスト送信できる", async () => {
+    render(<ProfileControls showSmartNotifications />);
+    expect((screen.getByLabelText("スマート通知の開始時刻") as HTMLInputElement).value).toBe("08:00");
+    expect((screen.getByLabelText("スマート通知の終了時刻") as HTMLInputElement).value).toBe("21:00");
+    fireEvent.click(screen.getByRole("button", { name: "今すぐ通知を送る" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "今すぐ通知を送る" })).toBeTruthy());
   });
 });
 

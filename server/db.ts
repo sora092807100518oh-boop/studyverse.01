@@ -1049,6 +1049,23 @@ export async function resetRevivalTickets(actorUserId: number, profileId: number
 
 export type SmartNotificationDirection = "question" | "answer";
 
+const NOTIFICATION_TIME_ZONE = "Asia/Tokyo";
+const NOTIFICATION_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+
+export function isWithinSmartNotificationWindow(date: Date, startTime: string, endTime: string, timeZone = NOTIFICATION_TIME_ZONE) {
+  if (!NOTIFICATION_TIME_PATTERN.test(startTime) || !NOTIFICATION_TIME_PATTERN.test(endTime)) return false;
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date);
+  const rawHour = Number(parts.find(part => part.type === "hour")?.value ?? 0);
+  const hour = rawHour === 24 ? 0 : rawHour;
+  const minute = Number(parts.find(part => part.type === "minute")?.value ?? 0);
+  const current = hour * 60 + minute;
+  const parse = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5));
+  const start = parse(startTime);
+  const end = parse(endTime);
+  if (start === end) return true;
+  return start < end ? current >= start && current < end : current >= start || current < end;
+}
+
 export async function getSmartNotificationSettings(userId: number) {
   const db = await getDb();
   if (!db) return null;
@@ -1056,13 +1073,18 @@ export async function getSmartNotificationSettings(userId: number) {
   return rows[0] ?? null;
 }
 
-export async function saveSmartNotificationSettings(userId: number, input: { wordbookId: number; direction: SmartNotificationDirection; enabled: boolean }) {
+export async function saveSmartNotificationSettings(userId: number, input: { wordbookId: number; direction: SmartNotificationDirection; enabled: boolean; startTime?: string; endTime?: string }) {
+  if (input.startTime !== undefined && !NOTIFICATION_TIME_PATTERN.test(input.startTime)) throw new Error("SMART_NOTIFICATION_TIME_INVALID");
+  if (input.endTime !== undefined && !NOTIFICATION_TIME_PATTERN.test(input.endTime)) throw new Error("SMART_NOTIFICATION_TIME_INVALID");
   const visibleBooks = await listVisibleWordbooks(userId);
   if (!visibleBooks.some(book => book.id === input.wordbookId)) throw new Error("SMART_NOTIFICATION_WORDBOOK_FORBIDDEN");
+  const existing = await getSmartNotificationSettings(userId);
+  const startTime = input.startTime ?? existing?.startTime ?? "08:00";
+  const endTime = input.endTime ?? existing?.endTime ?? "21:00";
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const values = { userId, wordbookId: input.wordbookId, direction: input.direction, enabled: input.enabled } as const;
-  await db.insert(smartNotificationSettings).values(values).onDuplicateKeyUpdate({ set: { wordbookId: input.wordbookId, direction: input.direction, enabled: input.enabled, updatedAt: new Date() } });
+  const values = { userId, wordbookId: input.wordbookId, direction: input.direction, startTime, endTime, enabled: input.enabled } as const;
+  await db.insert(smartNotificationSettings).values(values).onDuplicateKeyUpdate({ set: { wordbookId: input.wordbookId, direction: input.direction, startTime, endTime, enabled: input.enabled, updatedAt: new Date() } });
   return getSmartNotificationSettings(userId);
 }
 
@@ -1079,17 +1101,20 @@ export async function setSmartNotificationTaskUid(userId: number, taskUid: strin
   await db.update(smartNotificationSettings).set({ scheduleCronTaskUid: taskUid, updatedAt: new Date() }).where(eq(smartNotificationSettings.userId, userId));
 }
 
-export async function sendSmartNotification(taskUid: string) {
+type SmartNotificationSendOptions = { ignoreTimeWindow?: boolean };
+
+async function sendSmartNotificationForSettings(settings: typeof smartNotificationSettings.$inferSelect, options: SmartNotificationSendOptions = {}) {
   const db = await getDb();
   if (!db) return { sent: 0, skipped: "database" } as const;
-  const settings = (await db.select().from(smartNotificationSettings).where(eq(smartNotificationSettings.scheduleCronTaskUid, taskUid)).limit(1))[0];
-  if (!settings || !settings.enabled) return { sent: 0, skipped: "disabled" } as const;
+  if (!settings.enabled) return { sent: 0, skipped: "disabled" } as const;
+  if (!options.ignoreTimeWindow && !isWithinSmartNotificationWindow(new Date(), settings.startTime, settings.endTime)) return { sent: 0, skipped: "outside_hours" } as const;
   const books = await listVisibleWordbooks(settings.userId);
   const book = books.find(item => item.id === settings.wordbookId);
   if (!book || !book.words.length) return { sent: 0, skipped: "empty" } as const;
+  const subscriptions = await db.select().from(smartNotificationSubscriptions).where(eq(smartNotificationSubscriptions.userId, settings.userId));
+  if (!subscriptions.length) return { sent: 0, skipped: "no_subscription", wordId: book.words[0]?.id } as const;
   const word = book.words[Math.floor(Math.random() * book.words.length)];
   webpush.setVapidDetails(ENV.vapidSubject, ENV.vapidPublicKey, ENV.vapidPrivateKey);
-  const subscriptions = await db.select().from(smartNotificationSubscriptions).where(eq(smartNotificationSubscriptions.userId, settings.userId));
   const payload = JSON.stringify({ title: `StudyVerse｜${book.title}`, body: settings.direction === "question" ? word.front : word.back, answer: settings.direction === "question" ? word.back : word.front, direction: settings.direction, wordId: word.id, tag: `smart-${word.id}` });
   let sent = 0;
   for (const subscription of subscriptions) {
@@ -1100,5 +1125,20 @@ export async function sendSmartNotification(taskUid: string) {
       else console.warn("[SmartNotification] send failed", error);
     }
   }
+  console.info("[SmartNotification] delivery", { userId: settings.userId, wordId: word.id, sent, subscriptions: subscriptions.length });
   return { sent, wordId: word.id } as const;
+}
+
+export async function sendSmartNotification(taskUid: string) {
+  const db = await getDb();
+  if (!db) return { sent: 0, skipped: "database" } as const;
+  const settings = (await db.select().from(smartNotificationSettings).where(eq(smartNotificationSettings.scheduleCronTaskUid, taskUid)).limit(1))[0];
+  if (!settings) return { sent: 0, skipped: "not_found" } as const;
+  return sendSmartNotificationForSettings(settings);
+}
+
+export async function sendSmartNotificationNow(userId: number) {
+  const settings = await getSmartNotificationSettings(userId);
+  if (!settings) return { sent: 0, skipped: "not_found" } as const;
+  return sendSmartNotificationForSettings(settings, { ignoreTimeWindow: true });
 }
