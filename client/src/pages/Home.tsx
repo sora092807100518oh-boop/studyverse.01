@@ -383,7 +383,12 @@ function SmartNotificationControls() {
     try {
       const result = await sendTest.mutateAsync();
       if (result.sent > 0) toast.success("テスト通知を送信しました。ロック画面を確認してください。");
-      else toast.error(result.skipped === "no_subscription" ? "端末通知が登録されていません。通知をONにしてください。" : "テスト通知を送信できませんでした。通知設定を確認してください。");
+      else if (result.skipped === "no_subscription") toast.error("端末通知が登録されていません。いったん通知をOFFにしてからONにし、再試行してください。");
+      else if (result.skipped === "delivery_failed") toast.error("通知サービスが端末へ届けられませんでした。通知許可を確認してから再試行してください。");
+      else if (result.skipped === "disabled") toast.error("スマート通知がOFFです。通知をONにしてから再試行してください。");
+      else if (result.skipped === "empty") toast.error("選択した単語帳に単語がありません。単語を追加してから再試行してください。");
+      else if (result.skipped === "configuration") toast.error("通知認証の設定に問題があります。管理者へ連絡してください。");
+      else toast.error("通知設定が見つかりません。単語帳を選び、通知をONにしてから再試行してください。");
     } catch (error) { toast.error(error instanceof Error ? error.message : "テスト通知を送信できませんでした。"); }
   };
   const toggle = async (next: boolean) => {

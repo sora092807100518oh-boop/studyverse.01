@@ -1114,18 +1114,22 @@ async function sendSmartNotificationForSettings(settings: typeof smartNotificati
   const subscriptions = await db.select().from(smartNotificationSubscriptions).where(eq(smartNotificationSubscriptions.userId, settings.userId));
   if (!subscriptions.length) return { sent: 0, skipped: "no_subscription", wordId: book.words[0]?.id } as const;
   const word = book.words[Math.floor(Math.random() * book.words.length)];
-  webpush.setVapidDetails(ENV.vapidSubject, ENV.vapidPublicKey, ENV.vapidPrivateKey);
+  try { webpush.setVapidDetails(ENV.vapidSubject, ENV.vapidPublicKey, ENV.vapidPrivateKey); }
+  catch (error) { console.error("[SmartNotification] VAPID configuration failed", error); return { sent: 0, skipped: "configuration", wordId: word.id } as const; }
   const payload = JSON.stringify({ title: `StudyVerse｜${book.title}`, body: settings.direction === "question" ? word.front : word.back, answer: settings.direction === "question" ? word.back : word.front, direction: settings.direction, wordId: word.id, tag: `smart-${word.id}` });
   let sent = 0;
+  let failed = 0;
   for (const subscription of subscriptions) {
     try { await webpush.sendNotification(JSON.parse(subscription.subscriptionJson), payload); sent += 1; }
     catch (error) {
+      failed += 1;
       const statusCode = (error as { statusCode?: number }).statusCode;
       if (statusCode === 404 || statusCode === 410) await db.delete(smartNotificationSubscriptions).where(eq(smartNotificationSubscriptions.id, subscription.id));
-      else console.warn("[SmartNotification] send failed", error);
+      else console.warn("[SmartNotification] send failed", { statusCode, error });
     }
   }
-  console.info("[SmartNotification] delivery", { userId: settings.userId, wordId: word.id, sent, subscriptions: subscriptions.length });
+  console.info("[SmartNotification] delivery", { userId: settings.userId, wordId: word.id, sent, failed, subscriptions: subscriptions.length });
+  if (!sent) return { sent: 0, skipped: "delivery_failed", wordId: word.id } as const;
   return { sent, wordId: word.id } as const;
 }
 

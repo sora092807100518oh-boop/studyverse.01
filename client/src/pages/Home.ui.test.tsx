@@ -8,6 +8,7 @@ const hooks = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   invalidate: vi.fn().mockResolvedValue(undefined),
   announcements: [] as Array<{ id: number; title: string; body: string; publishedAt: Date }>,
+  sendTestResult: { sent: 1 } as { sent: number; skipped?: string },
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -28,7 +29,7 @@ vi.mock("@/lib/trpc", () => ({
       publicKey: { useQuery: () => ({ data: { publicKey: "test-public-key" } }) },
       subscribe: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ success: true }), isPending: false }) },
       save: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ success: true }), isPending: false }) },
-      sendTest: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ sent: 1 }), isPending: false }) },
+      sendTest: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue(hooks.sendTestResult), isPending: false }) },
     },
     wordbooks: {
       list: { useQuery: () => ({ data: [{ id: 1, title: "英語テスト", subject: "english" }], isLoading: false }) },
@@ -100,6 +101,7 @@ afterEach(() => {
   hooks.toastSuccess.mockReset();
   hooks.invalidate.mockClear();
   hooks.announcements = [];
+  hooks.sendTestResult = { sent: 1 };
   window.localStorage.clear();
 });
 
@@ -151,6 +153,12 @@ describe("学習プロフィール", () => {
     expect((screen.getByLabelText("スマート通知の終了時刻") as HTMLInputElement).value).toBe("21:00");
     fireEvent.click(screen.getByRole("button", { name: "今すぐ通知を送る" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "今すぐ通知を送る" })).toBeTruthy());
+  });
+  it("配送失敗時は通知許可の確認と再試行を案内する", async () => {
+    hooks.sendTestResult = { sent: 0, skipped: "delivery_failed" };
+    render(<ProfileControls showSmartNotifications />);
+    fireEvent.click(screen.getByRole("button", { name: "今すぐ通知を送る" }));
+    await waitFor(() => expect(hooks.toastError).toHaveBeenCalledWith("通知サービスが端末へ届けられませんでした。通知許可を確認してから再試行してください。"));
   });
 });
 

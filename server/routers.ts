@@ -75,7 +75,12 @@ export const appRouter = router({
       } catch (error) { return toUserMessage(error); }
     }),
     sendTest: protectedProcedure.mutation(async ({ ctx }) => {
-      try { return await sendSmartNotificationNow(ctx.user.id); } catch (error) { return toUserMessage(error); }
+      try { return await sendSmartNotificationNow(ctx.user.id); }
+      catch (error) {
+        console.error("[SmartNotification] immediate delivery failed", { userId: ctx.user.id, error });
+        if (error instanceof Error && error.message === "DATABASE_UNAVAILABLE") return toUserMessage(error);
+        throw new TRPCError({ code: "BAD_GATEWAY", message: "通知を送信できませんでした。通知設定と端末の通知許可を確認して、もう一度お試しください。" });
+      }
     }),
   }),
   system: systemRouter,
