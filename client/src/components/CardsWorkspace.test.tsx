@@ -7,12 +7,14 @@ const hooks = vi.hoisted(() => ({
   remove: vi.fn().mockResolvedValue({ success: true }),
   invalidate: vi.fn().mockResolvedValue(undefined),
   recordAnswer: vi.fn().mockResolvedValue({ success: true }),
+  saveNote: vi.fn().mockResolvedValue({ wordId: 101, note: "覚え方メモ" }),
+  setNotes: vi.fn(),
   reviewRefetch: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ studySets: { list: { invalidate: hooks.invalidate } }, wordbooks: { list: { invalidate: hooks.invalidate } } }),
+    useUtils: () => ({ studySets: { list: { invalidate: hooks.invalidate } }, wordbooks: { list: { invalidate: hooks.invalidate } }, wordNotes: { list: { setData: hooks.setNotes, invalidate: hooks.invalidate } } }),
     wordbooks: { list: { useQuery: (input: { subject?: string }) => ({ data: input.subject === "kanji" ? [{ id: 11, title: "漢字第1章", words: [{ id: 301, front: "学", back: "まなぶ", reading: "まなぶ" }] }] : [{ id: 10, title: "英語第1章", words: [{ id: 101, front: "alpha", back: "最初", reading: null }, { id: 102, front: "beta", back: "次", reading: null }] }] }) } },
     studySets: {
       list: { useQuery: () => ({ data: [{ id: 1, label: "英語第1章 第1〜20語", subject: "english", words: Array.from({ length: 20 }, (_, index) => ({ id: 101 + index, front: index === 0 ? "alpha" : `word-${index + 1}`, back: index === 0 ? "最初" : `意味${index + 1}`, reading: null })) }, { id: 2, label: "漢字第1章", subject: "kanji", words: [{ id: 301, front: "学", back: "まなぶ", reading: "まなぶ" }] }] }) },
@@ -20,6 +22,7 @@ vi.mock("@/lib/trpc", () => ({
       delete: { useMutation: () => ({ mutateAsync: hooks.remove }) },
     },
     classroom: { recommendedTests: { list: { useQuery: () => ({ data: [{ id: 5, wordbookTitle: "配信教材", subject: "english", rangeStart: 2, rangeEnd: 2, questionCount: 1, words: [{ id: 202, front: "gamma", back: "三番目", reading: null }] }] }) } } },
+    wordNotes: { list: { useQuery: () => ({ data: [] }) }, save: { useMutation: () => ({ mutateAsync: hooks.saveNote, isPending: false }) } },
     learning: { review: { useQuery: () => ({ data: [], refetch: hooks.reviewRefetch }) }, dashboard: { useQuery: () => ({ data: { mistakeCounts: [], practiceRatings: [{ wordId: 101, rating: "instant" }, { wordId: 102, rating: "slow" }] }, refetch: hooks.reviewRefetch }) }, recordAnswer: { useMutation: () => ({ mutateAsync: hooks.recordAnswer }) } },
   },
 }));
@@ -47,7 +50,17 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("最初")).toBeTruthy();
   });
-  it("特訓モードは初期状態がオフで、右・上判定済みカードを出題しない", () => {
+  it("練習カードの一言メモを保存できる", async () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    fireEvent.click(screen.getByRole("button", { name: "一言メモ" }));
+    fireEvent.change(screen.getByLabelText("一言メモ"), { target: { value: "覚え方メモ" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存する" }));
+    await waitFor(() => expect(hooks.saveNote).toHaveBeenCalledWith({ wordId: 101, note: "覚え方メモ" }));
+  });
+  it("特訓モードは初期状態がオフで、過去判定にかかわらず選択範囲の全カードから開始する", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
@@ -56,10 +69,9 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(trainingSwitch);
     expect(trainingSwitch.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
-    expect(screen.getByText("意味2")).toBeTruthy();
-    expect(screen.queryByText("最初")).toBeNull();
+    expect(screen.getByText("最初")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /覚えた/ }));
-    expect(screen.getByText("意味3")).toBeTruthy();
+    expect(screen.getByText("意味2")).toBeTruthy();
   });
   it("特訓モードは右判定で最後の未達成カードを完了扱いにする", () => {
     render(<CardsWorkspace books={books} />);

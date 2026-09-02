@@ -19,9 +19,9 @@ vi.mock("@/lib/trpc", () => ({
       },
       dashboard: { useQuery: () => ({ data: { reviewWords: [], unstartedSets: [] } }) },
     },
-    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } } }),
-    auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前" } } }) } },
-    profile: { updateName: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) } },
+    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } }, classroom: { online: { list: { invalidate: hooks.invalidate } } } }),
+    auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前", avatarUrl: null } } }) } },
+    profile: { updateName: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) }, uploadAvatar: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ avatarUrl: "/manus-storage/profile-test.png" }), isPending: false }) } },
     monster: { dashboard: { useQuery: () => ({ data: { eggs: [] } }) } },
     calendar: { dashboard: { useQuery: () => ({ data: { revivalTickets: 2 } }) } },
     smartNotifications: {
@@ -43,6 +43,7 @@ vi.mock("@/lib/trpc", () => ({
     },
     classroom: {
       calendar: { list: { useQuery: () => ({ data: [] }) }, create: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) }, deletePersonal: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) } },
+      online: { list: { useQuery: () => ({ data: { classroom: { id: 1, name: "テスト教室" }, members: [] }, isLoading: false, isError: false, refetch: vi.fn() }) }, ping: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ online: true }) }) } },
       announcements: {
         list: { useQuery: () => ({ data: hooks.announcements, isLoading: false, isError: false, refetch: vi.fn() }) },
       },
@@ -135,6 +136,7 @@ describe("学習プロフィール", () => {
     render(<ProfileControls />);
     expect(screen.getByText("ユーザーネーム")).toBeTruthy();
     expect(screen.getByTestId("profile-username").textContent).toBe("学習者の名前");
+    expect(screen.getByLabelText("プロフィール画像を変更")).toBeTruthy();
   });
 
   it("表示名保存時に親画面の保持コールバックへ最新値を渡す", async () => {
@@ -171,6 +173,12 @@ describe("集中時間の即時表示", () => {
     rerender(<HomeView {...props} running elapsed={130} />);
     expect(screen.getByText("2m 10s")).toBeTruthy();
     expect(screen.getByTestId("live-learning-trend").textContent).toBe("130");
+  });
+  it("ホーム最下部のオンライン状況ボタンから専用ページへ移動できる", () => {
+    const setPage = vi.fn();
+    render(<HomeView {...props} setPage={setPage} running={false} elapsed={0} />);
+    fireEvent.click(screen.getByRole("button", { name: /オンライン状況/ }));
+    expect(setPage).toHaveBeenCalledWith("online");
   });
 });
 

@@ -29,6 +29,7 @@ export const studentProfiles = mysqlTable("studentProfiles", {
   pinLookupHash: varchar("pinLookupHash", { length: 64 }).notNull(),
   classroomRole: mysqlEnum("classroomRole", ["student", "teacher", "owner"]).default("student").notNull(),
   displayName: varchar("displayName", { length: 80 }),
+  avatarUrl: varchar("avatarUrl", { length: 2048 }),
   revivalTickets: int("revivalTickets").default(2).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -110,6 +111,15 @@ export const vocabularyWords = mysqlTable("vocabularyWords", {
   source: mysqlEnum("source", ["manual", "csv", "admin"]).default("manual").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+export const vocabularyWordNotes = mysqlTable("vocabularyWordNotes", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  wordId: int("wordId").notNull(),
+  note: varchar("note", { length: 500 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [uniqueIndex("vocabulary_word_notes_user_word_unique").on(table.userId, table.wordId)]);
 
 export const smartNotificationSettings = mysqlTable("smartNotificationSettings", {
   id: int("id").autoincrement().primaryKey(),

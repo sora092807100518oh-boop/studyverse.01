@@ -2,7 +2,7 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "dri
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import webpush from "web-push";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -222,7 +222,7 @@ export async function authenticateWithPin(input: { classroomCode: string; pin: s
   const expiresAt = new Date(Date.now() + PIN_SESSION_TTL_MS);
   await db.insert(pinSessions).values({ tokenHash, profileId: profile[0].id, userId: profile[0].userId, classroomId: classroom[0].id, expiresAt });
   await writeActivity({ actorUserId: profile[0].userId, classroomId: classroom[0].id, category: "learning", action: "login.success", details: "pin" });
-  return { token, expiresAt, profile: { id: profile[0].id, userId: profile[0].userId, displayName: profile[0].displayName, classroomRole: profile[0].classroomRole }, classroom: { id: classroom[0].id, code: classroom[0].code, name: classroom[0].name } };
+  return { token, expiresAt, profile: { id: profile[0].id, userId: profile[0].userId, displayName: profile[0].displayName, avatarUrl: profile[0].avatarUrl, classroomRole: profile[0].classroomRole }, classroom: { id: classroom[0].id, code: classroom[0].code, name: classroom[0].name } };
 }
 
 export async function getPinSession(token: string) {
@@ -251,7 +251,7 @@ export async function listClassroomMembers(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-  const fields = { id: studentProfiles.id, userId: studentProfiles.userId, classroomId: studentProfiles.classroomId, classroomName: classrooms.name, displayName: studentProfiles.displayName, classroomRole: studentProfiles.classroomRole, createdAt: studentProfiles.createdAt };
+  const fields = { id: studentProfiles.id, userId: studentProfiles.userId, classroomId: studentProfiles.classroomId, classroomName: classrooms.name, displayName: studentProfiles.displayName, avatarUrl: studentProfiles.avatarUrl, classroomRole: studentProfiles.classroomRole, createdAt: studentProfiles.createdAt };
   if (account[0]?.role === "admin") return db.select(fields).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(eq(studentProfiles.classroomRole, "student"));
   const manager = await requireClassroomManager(userId);
   return db.select(fields).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(and(eq(studentProfiles.classroomId, manager.profile.classroomId), eq(studentProfiles.classroomRole, "student")));
@@ -359,6 +359,9 @@ export async function deleteClassroom(userId: number, classroomId: number) {
     if (memberUserIds.length) {
       await tx.delete(savedStudySets).where(inArray(savedStudySets.userId, memberUserIds));
       await tx.delete(revivalDays).where(inArray(revivalDays.userId, memberUserIds));
+      await tx.delete(vocabularyWordNotes).where(inArray(vocabularyWordNotes.userId, memberUserIds));
+      await tx.delete(smartNotificationSubscriptions).where(inArray(smartNotificationSubscriptions.userId, memberUserIds));
+      await tx.delete(smartNotificationSettings).where(inArray(smartNotificationSettings.userId, memberUserIds));
       await tx.delete(monsterMissionClaims).where(inArray(monsterMissionClaims.userId, memberUserIds));
       await tx.delete(monsterEggs).where(inArray(monsterEggs.userId, memberUserIds));
       await tx.delete(monsterProfiles).where(inArray(monsterProfiles.userId, memberUserIds));
@@ -644,6 +647,7 @@ export async function updateVocabularyWord(userId: number, vocabularyWordId: num
 
 export async function deleteVocabularyWord(userId: number, vocabularyWordId: number) {
   const { db, book, vocabularyWord } = await getVocabularyWordEditor(userId, vocabularyWordId);
+  await db.delete(vocabularyWordNotes).where(eq(vocabularyWordNotes.wordId, vocabularyWordId));
   await db.delete(vocabularyWords).where(eq(vocabularyWords.id, vocabularyWordId));
   await writeActivity({ actorUserId: userId, classroomId: book.classroomId ?? undefined, category: "classroom", action: "wordbook.word_deleted", details: vocabularyWord.front });
 }
@@ -712,6 +716,8 @@ export async function updateWordbook(userId: number, wordbookId: number, input: 
 
 export async function deleteWordbook(userId: number, wordbookId: number) {
   const { db, book } = await getWordbookEditor(userId, wordbookId);
+  const wordIds = await db.select({ id: vocabularyWords.id }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, wordbookId));
+  if (wordIds.length) await db.delete(vocabularyWordNotes).where(inArray(vocabularyWordNotes.wordId, wordIds.map(word => word.id)));
   await db.delete(vocabularyWords).where(eq(vocabularyWords.wordbookId, wordbookId));
   await db.delete(wordbooks).where(eq(wordbooks.id, wordbookId));
   await writeActivity({ actorUserId: userId, classroomId: book.classroomId ?? undefined, category: "classroom", action: "wordbook.deleted", details: book.title });
@@ -1018,6 +1024,70 @@ export async function saveStudySet(userId: number, input: { wordbookId: number; 
 export async function deleteSavedStudySet(userId: number, savedStudySetId: number) { const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); await db.delete(savedStudySets).where(and(eq(savedStudySets.id, savedStudySetId), eq(savedStudySets.userId, userId))); }
 
 export async function updateOwnDisplayName(userId: number, displayName: string) { const profile = await getProfile(userId); if (!profile) throw new Error("CLASSROOM_REQUIRED"); const normalized = displayName.trim(); if (!normalized || normalized.length > 80) throw new Error("DISPLAY_NAME_INVALID"); const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); await db.update(studentProfiles).set({ displayName: normalized }).where(eq(studentProfiles.id, profile.profile.id)); return { displayName: normalized }; }
+
+export async function uploadOwnAvatar(userId: number, dataUrl: string) {
+  const profile = await getProfile(userId);
+  if (!profile) throw new Error("CLASSROOM_REQUIRED");
+  const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-zA-Z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) throw new Error("PROFILE_IMAGE_INVALID");
+  const contentType = match[1];
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 3_000_000) throw new Error("PROFILE_IMAGE_INVALID");
+  const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const uploaded = await storagePut(`profiles/${profile.profile.id}/avatar.${extension}`, buffer, contentType);
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await db.update(studentProfiles).set({ avatarUrl: uploaded.url }).where(eq(studentProfiles.id, profile.profile.id));
+  return { avatarUrl: uploaded.url };
+}
+
+export async function listVocabularyWordNotes(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  return db.select({ wordId: vocabularyWordNotes.wordId, note: vocabularyWordNotes.note, updatedAt: vocabularyWordNotes.updatedAt }).from(vocabularyWordNotes).where(eq(vocabularyWordNotes.userId, userId));
+}
+
+export async function saveVocabularyWordNote(userId: number, wordId: number, note: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const visibleBooks = await listVisibleWordbooks(userId);
+  if (!visibleBooks.some(book => book.words.some(word => word.id === wordId))) throw new Error("WORD_BOOK_FORBIDDEN");
+  const normalized = note.trim();
+  if (!normalized) {
+    await db.delete(vocabularyWordNotes).where(and(eq(vocabularyWordNotes.userId, userId), eq(vocabularyWordNotes.wordId, wordId)));
+    return { wordId, note: "" };
+  }
+  await db.insert(vocabularyWordNotes).values({ userId, wordId, note: normalized }).onDuplicateKeyUpdate({ set: { note: normalized, updatedAt: new Date() } });
+  return { wordId, note: normalized };
+}
+
+export async function listClassroomOnlineStatus(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const viewer = await getProfile(userId);
+  if (!viewer) throw new Error("CLASSROOM_REQUIRED");
+  const now = new Date();
+  const todayKey = japanDateKey(now);
+  const todayStart = new Date(`${todayKey}T00:00:00+09:00`);
+  const [members, sessions, focusRows, answerRows] = await Promise.all([
+    db.select({ id: studentProfiles.id, userId: studentProfiles.userId, displayName: studentProfiles.displayName, avatarUrl: studentProfiles.avatarUrl, classroomRole: studentProfiles.classroomRole }).from(studentProfiles).where(eq(studentProfiles.classroomId, viewer.profile.classroomId)),
+    db.select({ userId: pinSessions.userId, lastSeenAt: pinSessions.lastSeenAt }).from(pinSessions).where(and(eq(pinSessions.classroomId, viewer.profile.classroomId), isNull(pinSessions.revokedAt), gt(pinSessions.expiresAt, now))),
+    db.select({ userId: focusSessions.userId, focusSeconds: focusSessions.focusSeconds }).from(focusSessions).where(and(eq(focusSessions.classroomId, viewer.profile.classroomId), gte(focusSessions.completedAt, todayStart))),
+    db.select({ userId: studyRecords.userId, wordId: studyRecords.wordId, practiceRating: studyRecords.practiceRating }).from(studyRecords).where(and(eq(studyRecords.classroomId, viewer.profile.classroomId), gte(studyRecords.answeredAt, todayStart), isNotNull(studyRecords.wordId))),
+  ]);
+  const lastSeenByUser = new Map<number, Date>();
+  for (const session of sessions) { const previous = lastSeenByUser.get(session.userId); if (!previous || session.lastSeenAt > previous) lastSeenByUser.set(session.userId, session.lastSeenAt); }
+  const focusByUser = new Map<number, number>();
+  for (const session of focusRows) focusByUser.set(session.userId, (focusByUser.get(session.userId) ?? 0) + session.focusSeconds);
+  const masteredByUser = new Map<number, Set<number>>();
+  for (const record of answerRows) if (record.wordId !== null && (record.practiceRating === "known" || record.practiceRating === "instant")) { const ids = masteredByUser.get(record.userId) ?? new Set<number>(); ids.add(record.wordId); masteredByUser.set(record.userId, ids); }
+  const rows = await Promise.all(members.map(async member => {
+    const lastSeenAt = lastSeenByUser.get(member.userId) ?? null;
+    const monster = await getMonsterDashboard(member.userId);
+    return { profileId: member.id, userId: member.userId, displayName: member.displayName, avatarUrl: member.avatarUrl, classroomRole: member.classroomRole, isSelf: member.userId === userId, online: Boolean(lastSeenAt && now.getTime() - lastSeenAt.getTime() <= 90_000), lastSeenAt, todayFocusSeconds: focusByUser.get(member.userId) ?? 0, todayMasteredWords: masteredByUser.get(member.userId)?.size ?? 0, monster: { eggNumber: monster.active.eggNumber, stage: monster.active.progression.stage } };
+  }));
+  return { classroom: { id: viewer.classroom.id, name: viewer.classroom.name }, members: rows.sort((left, right) => Number(right.online) - Number(left.online) || (right.lastSeenAt?.getTime() ?? 0) - (left.lastSeenAt?.getTime() ?? 0)) };
+}
 
 export async function getCalendarDashboard(userId: number) {
   const db = await getDb(); if (!db) throw new Error("DATABASE_UNAVAILABLE"); const profile = await getProfile(userId); if (!profile) throw new Error("CLASSROOM_REQUIRED");

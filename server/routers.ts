@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { addWordToWordbook, authenticateWithPin, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
-import { deleteSavedStudySet, getCalendarDashboard, listSavedStudySets, resetRevivalTickets, saveStudySet, updateOwnDisplayName, useRevivalTicket } from "./db";
+import { deleteSavedStudySet, getCalendarDashboard, listClassroomOnlineStatus, listSavedStudySets, listVocabularyWordNotes, resetRevivalTickets, saveStudySet, saveVocabularyWordNote, updateOwnDisplayName, uploadOwnAvatar, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
@@ -30,6 +30,7 @@ function toUserMessage(error: unknown): never {
   if (code === "MONSTER_EGG_UNAVAILABLE") throw new TRPCError({ code: "BAD_REQUEST", message: "選択した卵を持っていません。" });
   if (code === "MONSTER_CYCLE_ORDER_REQUIRED") throw new TRPCError({ code: "BAD_REQUEST", message: "周回育成は卵1、卵2、卵3の順で始めてください。" });
   if (code === "MONSTER_IMAGE_INVALID") throw new TRPCError({ code: "BAD_REQUEST", message: "画像は5MB以下のPNG・JPEG・WebPを指定してください。" });
+  if (code === "PROFILE_IMAGE_INVALID") throw new TRPCError({ code: "BAD_REQUEST", message: "プロフィール画像は3MB以下のPNG・JPEG・WebPを指定してください。" });
   if (code === "DATABASE_UNAVAILABLE") throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "学習データを保存できません。時間をおいて再試行してください。" });
   if (code === "CSV_INVALID_ROWS") throw new TRPCError({ code: "BAD_REQUEST", message: "形式が正しくない行があります。プレビューを確認して修正してください。" });
   if (code === "CSV_LIMIT_EXCEEDED") throw new TRPCError({ code: "BAD_REQUEST", message: "CSVは3,000行以内にしてください。" });
@@ -50,6 +51,11 @@ export const appRouter = router({
   }),
   profile: router({
     updateName: protectedProcedure.input(z.object({ displayName: z.string().trim().min(1).max(80) })).mutation(async ({ ctx, input }) => { try { return await updateOwnDisplayName(ctx.user.id, input.displayName); } catch (error) { return toUserMessage(error); } }),
+    uploadAvatar: protectedProcedure.input(z.object({ dataUrl: z.string().max(4_500_000) })).mutation(async ({ ctx, input }) => { try { return await uploadOwnAvatar(ctx.user.id, input.dataUrl); } catch (error) { return toUserMessage(error); } }),
+  }),
+  wordNotes: router({
+    list: protectedProcedure.query(async ({ ctx }) => { try { return await listVocabularyWordNotes(ctx.user.id); } catch (error) { return toUserMessage(error); } }),
+    save: protectedProcedure.input(z.object({ wordId: z.number().int().positive(), note: z.string().max(500) })).mutation(async ({ ctx, input }) => { try { return await saveVocabularyWordNote(ctx.user.id, input.wordId, input.note); } catch (error) { return toUserMessage(error); } }),
   }),
   calendar: router({
     dashboard: protectedProcedure.query(async ({ ctx }) => getCalendarDashboard(ctx.user.id)),
@@ -156,7 +162,7 @@ export const appRouter = router({
       if (!token) return null;
       const result = await getPinSession(token);
       if (!result) return null;
-      return { profile: { id: result.profile.id, userId: result.profile.userId, displayName: result.profile.displayName, classroomRole: result.profile.classroomRole }, classroom: { id: result.classroom.id, code: result.classroom.code, name: result.classroom.name } };
+      return { profile: { id: result.profile.id, userId: result.profile.userId, displayName: result.profile.displayName, avatarUrl: result.profile.avatarUrl, classroomRole: result.profile.classroomRole }, classroom: { id: result.classroom.id, code: result.classroom.code, name: result.classroom.name } };
     }),
     pinLogout: publicProcedure.mutation(async ({ ctx }) => {
       const token = ctx.req.cookies?.studyverse_pin as string | undefined;
@@ -280,6 +286,10 @@ export const appRouter = router({
       resetRevivalTickets: protectedProcedure.input(z.object({ profileId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
         try { return await resetRevivalTickets(ctx.user.id, input.profileId); } catch (error) { return toUserMessage(error); }
       }),
+    }),
+    online: router({
+      list: protectedProcedure.query(async ({ ctx }) => { try { return await listClassroomOnlineStatus(ctx.user.id); } catch (error) { return toUserMessage(error); } }),
+      ping: protectedProcedure.mutation(() => ({ online: true, at: new Date() })),
     }),
     announcements: router({
       list: protectedProcedure.query(async ({ ctx }) => listVisibleAnnouncements(ctx.user.id)),
