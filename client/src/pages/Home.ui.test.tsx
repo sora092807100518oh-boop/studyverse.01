@@ -19,7 +19,7 @@ vi.mock("@/lib/trpc", () => ({
       },
       dashboard: { useQuery: () => ({ data: { reviewWords: [], unstartedSets: [] } }) },
     },
-    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } }, classroom: { online: { list: { invalidate: hooks.invalidate } } } }),
+    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } }, classroom: { online: { list: { invalidate: hooks.invalidate } }, recommendedTests: { announcements: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate } } } }),
     auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前", avatarUrl: null } } }) } },
     profile: { updateName: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) }, uploadAvatar: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ avatarUrl: "/manus-storage/profile-test.png" }), isPending: false }) } },
     monster: { dashboard: { useQuery: () => ({ data: { eggs: [] } }) } },
@@ -46,6 +46,10 @@ vi.mock("@/lib/trpc", () => ({
       online: { list: { useQuery: () => ({ data: { classroom: { id: 1, name: "テスト教室" }, members: [] }, isLoading: false, isError: false, refetch: vi.fn() }) }, ping: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ online: true }) }) } },
       announcements: {
         list: { useQuery: () => ({ data: hooks.announcements, isLoading: false, isError: false, refetch: vi.fn() }) },
+      },
+      recommendedTests: {
+        announcements: { useQuery: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }) },
+        claim: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
       },
     },
   },

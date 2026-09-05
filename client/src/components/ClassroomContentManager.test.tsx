@@ -27,6 +27,8 @@ vi.mock("@/lib/trpc", () => ({
       managed: { useQuery: () => ({ data: hooks.managedBooks, isLoading: false, isError: false }) },
       create: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
       update: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
+      updateWord: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
+      uploadImage: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ imageUrl: "https://example.com/uploaded.png" }), isPending: false }) },
       delete: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
       exportCsv: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
     },

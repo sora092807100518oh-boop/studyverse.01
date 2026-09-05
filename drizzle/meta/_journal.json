@@ -141,6 +141,13 @@
       "when": 1788386125548,
       "tag": "0019_flowery_vector",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "5",
+      "when": 1788394528150,
+      "tag": "0020_cute_bishop",
+      "breakpoints": true
     }
   ]
 }

@@ -108,6 +108,9 @@ export const vocabularyWords = mysqlTable("vocabularyWords", {
   front: varchar("front", { length: 500 }).notNull(),
   back: varchar("back", { length: 500 }).notNull(),
   reading: varchar("reading", { length: 500 }),
+  imageUrl: varchar("imageUrl", { length: 2048 }),
+  exampleSentence: varchar("exampleSentence", { length: 1200 }),
+  exampleTranslation: varchar("exampleTranslation", { length: 1200 }),
   source: mysqlEnum("source", ["manual", "csv", "admin"]).default("manual").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
@@ -196,10 +199,19 @@ export const recommendedTests = mysqlTable("recommendedTests", {
   rangeStart: int("rangeStart").notNull(),
   rangeEnd: int("rangeEnd").notNull(),
   questionCount: int("questionCount").notNull(),
+  deliveryMode: mysqlEnum("deliveryMode", ["normal", "announcement"]).default("normal").notNull(),
   availableFrom: timestamp("availableFrom").defaultNow().notNull(),
   availableUntil: timestamp("availableUntil"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
+
+export const recommendedTestClaims = mysqlTable("recommendedTestClaims", {
+  id: int("id").autoincrement().primaryKey(),
+  recommendedTestId: int("recommendedTestId").notNull(),
+  userId: int("userId").notNull(),
+  receivedWordbookId: int("receivedWordbookId").notNull(),
+  claimedAt: timestamp("claimedAt").defaultNow().notNull(),
+}, table => [uniqueIndex("recommended_test_claims_test_user_unique").on(table.recommendedTestId, table.userId)]);
 
 export const savedStudySets = mysqlTable("savedStudySets", {
   id: int("id").autoincrement().primaryKey(),

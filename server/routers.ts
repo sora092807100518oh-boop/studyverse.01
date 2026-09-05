@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage } from "./db";
+import { addWordToWordbook, authenticateWithPin, claimAnnouncementRecommendedTest, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listAnnouncementRecommendedTests, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage, uploadVocabularyWordImage } from "./db";
 import { deleteSavedStudySet, getCalendarDashboard, listClassroomOnlineStatus, listSavedStudySets, listVocabularyWordNotes, resetRevivalTickets, saveStudySet, saveVocabularyWordNote, updateOwnDisplayName, uploadOwnAvatar, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -18,6 +18,8 @@ function toUserMessage(error: unknown): never {
   if (code === "MEMBER_DETAIL_FORBIDDEN") throw new TRPCError({ code: "FORBIDDEN", message: "この利用者の詳細を閲覧する権限がありません。" });
   if (code === "MEMBER_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "対象の利用者が見つかりません。" });
   if (code === "GLOBAL_MANAGER_REQUIRED") throw new TRPCError({ code: "FORBIDDEN", message: "全体公開は全体管理者のみが実行できます。" });
+  if (code === "RECOMMENDED_TEST_NOT_AVAILABLE") throw new TRPCError({ code: "BAD_REQUEST", message: "この教材の受取期間は終了しています。" });
+  if (code === "TEST_PERIOD_REQUIRED") throw new TRPCError({ code: "BAD_REQUEST", message: "お知らせ配布では表示終了日時を設定してください。" });
   if (code === "PIN_RATE_LIMITED") throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "ログイン試行が多すぎます。15分ほど待ってから再試行してください。" });
   if (code === "INVALID_PIN_LOGIN") throw new TRPCError({ code: "UNAUTHORIZED", message: "PINまたは教室コードが正しくありません。" });
   if (code === "TEACHER_ID_NOT_FOUND") throw new TRPCError({ code: "UNAUTHORIZED", message: "先生IDが正しくないか、担当教室が設定されていません。" });
@@ -224,9 +226,12 @@ export const appRouter = router({
     addWord: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), front: z.string().trim().min(1).max(500), back: z.string().trim().min(1).max(500), reading: z.string().trim().max(500).optional(), source: z.enum(["manual", "csv", "admin"]).optional() })).mutation(async ({ ctx, input }) => {
       try { return await addWordToWordbook(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
     }),
-    updateWord: protectedProcedure.input(z.object({ vocabularyWordId: z.number().int().positive(), front: z.string().trim().min(1).max(500).optional(), back: z.string().trim().min(1).max(500).optional(), reading: z.string().trim().max(500).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    updateWord: protectedProcedure.input(z.object({ vocabularyWordId: z.number().int().positive(), front: z.string().trim().min(1).max(500).optional(), back: z.string().trim().min(1).max(500).optional(), reading: z.string().trim().max(500).nullable().optional(), imageUrl: z.string().url().max(2048).nullable().optional(), exampleSentence: z.string().trim().max(1200).nullable().optional(), exampleTranslation: z.string().trim().max(1200).nullable().optional() })).mutation(async ({ ctx, input }) => {
       const { vocabularyWordId, ...update } = input;
       try { await updateVocabularyWord(ctx.user.id, vocabularyWordId, update); return { success: true }; } catch (error) { return toUserMessage(error); }
+    }),
+    uploadImage: protectedProcedure.input(z.object({ vocabularyWordId: z.number().int().positive(), dataUrl: z.string().max(7_000_000) })).mutation(async ({ ctx, input }) => {
+      try { return await uploadVocabularyWordImage(ctx.user.id, input.vocabularyWordId, input.dataUrl); } catch (error) { return toUserMessage(error); }
     }),
     deleteWord: protectedProcedure.input(z.object({ vocabularyWordId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
       try { await deleteVocabularyWord(ctx.user.id, input.vocabularyWordId); return { success: true }; } catch (error) { return toUserMessage(error); }
@@ -324,11 +329,17 @@ export const appRouter = router({
       list: protectedProcedure.query(async ({ ctx }) => {
         try { return await listRecommendedTestsForLearner(ctx.user.id); } catch (error) { return toUserMessage(error); }
       }),
+      announcements: protectedProcedure.query(async ({ ctx }) => {
+        try { return await listAnnouncementRecommendedTests(ctx.user.id); } catch (error) { return toUserMessage(error); }
+      }),
       manage: protectedProcedure.query(async ({ ctx }) => {
         try { return await listManageableRecommendedTests(ctx.user.id); } catch (error) { return toUserMessage(error); }
       }),
-      create: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), rangeStart: z.number().int().positive(), rangeEnd: z.number().int().positive(), questionCount: z.number().int().positive(), classroomId: z.number().int().positive().optional(), allClassrooms: z.boolean().optional(), availableFrom: z.date().optional(), availableUntil: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
+      create: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), rangeStart: z.number().int().positive(), rangeEnd: z.number().int().positive(), questionCount: z.number().int().positive(), deliveryMode: z.enum(["normal", "announcement"]).default("normal"), classroomId: z.number().int().positive().optional(), allClassrooms: z.boolean().optional(), availableFrom: z.date().optional(), availableUntil: z.date().nullable().optional() })).mutation(async ({ ctx, input }) => {
         try { return await createRecommendedTest(ctx.user.id, { ...input, availableUntil: input.availableUntil ?? undefined }); } catch (error) { return toUserMessage(error); }
+      }),
+      claim: protectedProcedure.input(z.object({ recommendedTestId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
+        try { return await claimAnnouncementRecommendedTest(ctx.user.id, input.recommendedTestId); } catch (error) { return toUserMessage(error); }
       }),
       delete: protectedProcedure.input(z.object({ recommendedTestId: z.number().int().positive() })).mutation(async ({ ctx, input }) => {
         try { await deleteRecommendedTest(ctx.user.id, input.recommendedTestId); return { success: true }; } catch (error) { return toUserMessage(error); }
