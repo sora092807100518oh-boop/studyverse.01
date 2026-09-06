@@ -510,7 +510,7 @@ async function getRecommendedTestClassroomIds(userId: number, requestedClassroom
   return [latest.id];
 }
 
-export async function createRecommendedTest(userId: number, input: { wordbookId: number; rangeStart: number; rangeEnd: number; questionCount: number; deliveryMode?: "normal" | "announcement"; classroomId?: number; allClassrooms?: boolean; availableFrom?: Date; availableUntil?: Date }) {
+export async function createRecommendedTest(userId: number, input: { wordbookId: number; rangeStart: number; rangeEnd: number; questionCount: number; deliveryMode?: "normal" | "announcement"; deliveryType?: "test" | "wordbook"; classroomId?: number; allClassrooms?: boolean; availableFrom?: Date; availableUntil?: Date }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const classroomIds = await getRecommendedTestClassroomIds(userId, input.classroomId, input.allClassrooms);
@@ -524,9 +524,11 @@ export async function createRecommendedTest(userId: number, input: { wordbookId:
   const rangeLength = input.rangeEnd - input.rangeStart + 1;
   if (input.questionCount < 1 || input.questionCount > rangeLength) throw new Error("TEST_QUESTION_COUNT_INVALID");
   const deliveryMode = input.deliveryMode ?? "normal";
+  const deliveryType = input.deliveryType ?? "test";
+  if (deliveryType === "wordbook" && (input.rangeStart !== 1 || input.rangeEnd !== words.length || input.questionCount !== words.length)) throw new Error("WORD_BOOK_DELIVERY_RANGE_INVALID");
   if (deliveryMode === "announcement" && !input.availableUntil) throw new Error("TEST_PERIOD_REQUIRED");
   if (input.availableUntil && input.availableFrom && input.availableUntil < input.availableFrom) throw new Error("TEST_PERIOD_INVALID");
-  const values = classroomIds.map(classroomId => ({ classroomId, authorUserId: userId, wordbookId: book.id, rangeStart: input.rangeStart, rangeEnd: input.rangeEnd, questionCount: input.questionCount, deliveryMode, availableFrom: input.availableFrom ?? new Date(Date.now() - 1_000), availableUntil: input.availableUntil ?? null }));
+  const values = classroomIds.map(classroomId => ({ classroomId, authorUserId: userId, wordbookId: book.id, rangeStart: input.rangeStart, rangeEnd: input.rangeEnd, questionCount: input.questionCount, deliveryMode, deliveryType, availableFrom: input.availableFrom ?? new Date(Date.now() - 1_000), availableUntil: input.availableUntil ?? null }));
   const createdIds = classroomIds.length === 1 ? (await db.insert(recommendedTests).values(values[0]!).$returningId()).map(item => item.id) : (await db.insert(recommendedTests).values(values), [] as number[]);
   await Promise.all(classroomIds.map(classroomId => writeActivity({ actorUserId: userId, classroomId, category: "classroom", action: "recommendedTest.created", details: `${book.title}｜第${input.rangeStart}〜${input.rangeEnd}語` })));
   return { id: createdIds[0], createdIds, targetCount: classroomIds.length };
@@ -550,7 +552,10 @@ export async function listRecommendedTestsForLearner(userId: number) {
   if (!profile) return [];
   const now = new Date();
   const rows = await db.select().from(recommendedTests).where(and(eq(recommendedTests.classroomId, profile.profile.classroomId), eq(recommendedTests.deliveryMode, "normal"), lte(recommendedTests.availableFrom, now), or(isNull(recommendedTests.availableUntil), gte(recommendedTests.availableUntil, now)))).orderBy(desc(recommendedTests.createdAt));
-  return decorateRecommendedTests(rows);
+  const decorated = await decorateRecommendedTests(rows);
+  const claims = await db.select({ recommendedTestId: recommendedTestClaims.recommendedTestId, receivedWordbookId: recommendedTestClaims.receivedWordbookId }).from(recommendedTestClaims).where(eq(recommendedTestClaims.userId, userId));
+  const claimByTest = new Map(claims.map(claim => [claim.recommendedTestId, claim.receivedWordbookId]));
+  return decorated.map(item => ({ ...item, claimed: item.deliveryType === "wordbook" ? claimByTest.has(item.id) : false, receivedWordbookId: item.deliveryType === "wordbook" ? claimByTest.get(item.id) ?? null : null }));
 }
 
 export async function listAnnouncementRecommendedTests(userId: number) {
@@ -586,6 +591,29 @@ export async function claimAnnouncementRecommendedTest(userId: number, recommend
   await db.insert(vocabularyWords).values(selectedWords.map(word => ({ wordbookId: receivedWordbookId, front: word.front, back: word.back, reading: word.reading, imageUrl: word.imageUrl, exampleSentence: word.exampleSentence, exampleTranslation: word.exampleTranslation, source: "admin" as const })));
   await db.insert(recommendedTestClaims).values({ recommendedTestId, userId, receivedWordbookId });
   await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "learning", action: "recommendedTest.claimed", details: `${sourceBook.title}｜第${item.rangeStart}〜${item.rangeEnd}語` });
+  return { receivedWordbookId, alreadyClaimed: false } as const;
+}
+
+export async function claimRecommendedWordbook(userId: number, recommendedTestId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const profile = await getProfile(userId);
+  if (!profile) throw new Error("CLASSROOM_REQUIRED");
+  const existing = (await db.select().from(recommendedTestClaims).where(and(eq(recommendedTestClaims.recommendedTestId, recommendedTestId), eq(recommendedTestClaims.userId, userId))).limit(1))[0];
+  if (existing) return { receivedWordbookId: existing.receivedWordbookId, alreadyClaimed: true } as const;
+  const now = new Date();
+  const item = (await db.select().from(recommendedTests).where(and(eq(recommendedTests.id, recommendedTestId), eq(recommendedTests.classroomId, profile.profile.classroomId), eq(recommendedTests.deliveryType, "wordbook"), lte(recommendedTests.availableFrom, now), or(isNull(recommendedTests.availableUntil), gte(recommendedTests.availableUntil, now)))).limit(1))[0];
+  if (!item) throw new Error("RECOMMENDED_WORD_BOOK_NOT_AVAILABLE");
+  const sourceBook = (await db.select().from(wordbooks).where(eq(wordbooks.id, item.wordbookId)).limit(1))[0];
+  if (!sourceBook) throw new Error("WORD_BOOK_NOT_FOUND");
+  const sourceWords = await db.select().from(vocabularyWords).where(eq(vocabularyWords.wordbookId, item.wordbookId)).orderBy(vocabularyWords.id);
+  const selectedWords = sourceWords.slice(item.rangeStart - 1, item.rangeEnd);
+  if (!selectedWords.length) throw new Error("TEST_RANGE_INVALID");
+  const insertedBook = await db.insert(wordbooks).values({ title: `${sourceBook.title}（配布）`, subject: sourceBook.subject, visibility: "private", ownerUserId: userId, classroomId: profile.profile.classroomId }).$returningId();
+  const receivedWordbookId = insertedBook[0]!.id;
+  await db.insert(vocabularyWords).values(selectedWords.map(word => ({ wordbookId: receivedWordbookId, front: word.front, back: word.back, reading: word.reading, imageUrl: word.imageUrl, exampleSentence: word.exampleSentence, exampleTranslation: word.exampleTranslation, source: "admin" as const })));
+  await db.insert(recommendedTestClaims).values({ recommendedTestId, userId, receivedWordbookId });
+  await writeActivity({ actorUserId: userId, classroomId: profile.profile.classroomId, category: "learning", action: "recommendedTest.wordbookClaimed", details: sourceBook.title });
   return { receivedWordbookId, alreadyClaimed: false } as const;
 }
 

@@ -1,0 +1,1 @@
+ALTER TABLE `recommendedTests` ADD `deliveryType` enum('test','wordbook') DEFAULT 'test' NOT NULL;

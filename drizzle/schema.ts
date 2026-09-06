@@ -200,6 +200,7 @@ export const recommendedTests = mysqlTable("recommendedTests", {
   rangeEnd: int("rangeEnd").notNull(),
   questionCount: int("questionCount").notNull(),
   deliveryMode: mysqlEnum("deliveryMode", ["normal", "announcement"]).default("normal").notNull(),
+  deliveryType: mysqlEnum("deliveryType", ["test", "wordbook"]).default("test").notNull(),
   availableFrom: timestamp("availableFrom").defaultNow().notNull(),
   availableUntil: timestamp("availableUntil"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

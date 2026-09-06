@@ -41,9 +41,12 @@ describe("お知らせ教材の受取と単語詳細", () => {
     const book = await createWordbook(admin.id, { title: "詳細付きお知らせ教材", subject: "english", visibility: "classroom", classroomId: classroom.id });
     await importWordbookCsv(admin.id, { wordbookId: book.id, csvText: "apple,りんご,アップル\nbook,本,ブック\ncat,猫,キャット" });
     const normal = await createRecommendedTest(admin.id, { wordbookId: book.id, rangeStart: 1, rangeEnd: 1, questionCount: 1, deliveryMode: "normal", classroomId: classroom.id });
+    const wordbookDelivery = await createRecommendedTest(admin.id, { wordbookId: book.id, rangeStart: 1, rangeEnd: 3, questionCount: 3, deliveryType: "wordbook", deliveryMode: "normal", classroomId: classroom.id });
+    await expect(createRecommendedTest(admin.id, { wordbookId: book.id, rangeStart: 1, rangeEnd: 2, questionCount: 2, deliveryMode: "announcement", classroomId: classroom.id, availableFrom: new Date(Date.now() + 60_000), availableUntil: new Date(Date.now() - 60_000) })).rejects.toThrow("TEST_PERIOD_INVALID");
     const announcement = await createRecommendedTest(admin.id, { wordbookId: book.id, rangeStart: 1, rangeEnd: 2, questionCount: 2, deliveryMode: "announcement", classroomId: classroom.id, availableFrom: new Date(Date.now() - 60_000), availableUntil: new Date(Date.now() + 60 * 60 * 1000) });
 
     expect((await listRecommendedTestsForLearner(learner.userId)).map(item => item.id)).toContain(normal.id);
+    expect((await listRecommendedTestsForLearner(learner.userId)).find(item => item.id === wordbookDelivery.id)).toMatchObject({ deliveryType: "wordbook", claimed: false, receivedWordbookId: null });
     expect((await listRecommendedTestsForLearner(learner.userId)).map(item => item.id)).not.toContain(announcement.id);
     const before = await listAnnouncementRecommendedTests(learner.userId);
     expect(before.find(item => item.id === announcement.id)).toMatchObject({ claimed: false, receivedWordbookId: null, rangeStart: 1, rangeEnd: 2 });

@@ -10,6 +10,7 @@ const hooks = vi.hoisted(() => ({
   saveNote: vi.fn().mockResolvedValue({ wordId: 101, note: "覚え方メモ" }),
   setNotes: vi.fn(),
   reviewRefetch: vi.fn().mockResolvedValue(undefined),
+  claimWordbook: vi.fn().mockResolvedValue({ receivedWordbookId: 303, alreadyClaimed: false }),
 }));
 
 vi.mock("@/lib/trpc", () => ({
@@ -17,11 +18,11 @@ vi.mock("@/lib/trpc", () => ({
     useUtils: () => ({ studySets: { list: { invalidate: hooks.invalidate } }, wordbooks: { list: { invalidate: hooks.invalidate } }, wordNotes: { list: { setData: hooks.setNotes, invalidate: hooks.invalidate } } }),
     wordbooks: { list: { useQuery: (input: { subject?: string }) => ({ data: input.subject === "kanji" ? [{ id: 11, title: "漢字第1章", words: [{ id: 301, front: "学", back: "まなぶ", reading: "まなぶ" }] }] : [{ id: 10, title: "英語第1章", words: [{ id: 101, front: "alpha", back: "最初", reading: null }, { id: 102, front: "beta", back: "次", reading: null }] }] }) } },
     studySets: {
-      list: { useQuery: () => ({ data: [{ id: 1, label: "英語第1章 第1〜20語", subject: "english", words: Array.from({ length: 20 }, (_, index) => ({ id: 101 + index, front: index === 0 ? "alpha" : `word-${index + 1}`, back: index === 0 ? "最初" : `意味${index + 1}`, reading: null })) }, { id: 2, label: "漢字第1章", subject: "kanji", words: [{ id: 301, front: "学", back: "まなぶ", reading: "まなぶ" }] }] }) },
+      list: { useQuery: () => ({ data: [{ id: 1, label: "英語第1章 第1〜20語", subject: "english", words: Array.from({ length: 20 }, (_, index) => ({ id: 101 + index, front: index === 0 ? "alpha" : `word-${index + 1}`, back: index === 0 ? "最初" : `意味${index + 1}`, reading: null, exampleSentence: index === 0 ? "I study alpha every day." : null, exampleTranslation: index === 0 ? "私は毎日alphaを勉強します。" : null })) }, { id: 2, label: "漢字第1章", subject: "kanji", words: [{ id: 301, front: "学", back: "まなぶ", reading: "まなぶ" }] }] }) },
       create: { useMutation: () => ({ mutateAsync: hooks.create }) },
       delete: { useMutation: () => ({ mutateAsync: hooks.remove }) },
     },
-    classroom: { recommendedTests: { list: { useQuery: () => ({ data: [{ id: 5, wordbookTitle: "配信教材", subject: "english", rangeStart: 2, rangeEnd: 2, questionCount: 1, words: [{ id: 202, front: "gamma", back: "三番目", reading: null }] }] }) } } },
+    classroom: { recommendedTests: { list: { useQuery: () => ({ data: [{ id: 5, wordbookTitle: "配信教材", subject: "english", rangeStart: 2, rangeEnd: 2, questionCount: 1, deliveryType: "test", words: [{ id: 202, front: "gamma", back: "三番目", reading: null }] }] }) }, claimWordbook: { useMutation: () => ({ mutateAsync: hooks.claimWordbook, isPending: false }) } } },
     wordNotes: { list: { useQuery: () => ({ data: [] }) }, save: { useMutation: () => ({ mutateAsync: hooks.saveNote, isPending: false }) } },
     learning: { review: { useQuery: () => ({ data: [], refetch: hooks.reviewRefetch }) }, dashboard: { useQuery: () => ({ data: { mistakeCounts: [], practiceRatings: [{ wordId: 101, rating: "instant" }, { wordId: 102, rating: "slow" }] }, refetch: hooks.reviewRefetch }) }, recordAnswer: { useMutation: () => ({ mutateAsync: hooks.recordAnswer }) } },
   },
@@ -50,6 +51,21 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("最初")).toBeTruthy();
   });
+  it("例文表示は現在のカード面を置き換え、カードを裏返すと英単語と意味へ戻る", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    const card = screen.getByLabelText("単語カードをスワイプ");
+    fireEvent.click(screen.getByRole("button", { name: "例文を見る" }));
+    expect(screen.getByText("私は毎日alphaを勉強します。" as string)).toBeTruthy();
+    expect(screen.queryByText("最初")).toBeNull();
+    fireEvent.click(card);
+    expect(screen.getByText("alpha")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "例文を見る" }));
+    expect(screen.getByText("I study alpha every day.")).toBeTruthy();
+    expect(screen.queryByText("alpha", { selector: "motion-p" })).toBeNull();
+  });
   it("練習カードの一言メモを保存できる", async () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
@@ -70,18 +86,18 @@ describe("保存学習セット方式の単語カード", () => {
     expect(trainingSwitch.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("最初")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /覚えた/ }));
+    fireEvent.click(screen.getByRole("button", { name: /GREAT \/ PERFECT/ }));
     expect(screen.getByText("意味2")).toBeTruthy();
   });
   it("特訓モードは右判定で最後の未達成カードを完了扱いにする", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
-    fireEvent.click(screen.getByRole("button", { name: /△ 遅答/ }));
+    fireEvent.click(screen.getByRole("button", { name: /ESCAPE \/ AVOID/ }));
     fireEvent.click(screen.getByRole("button", { name: /練習モード/ }));
     fireEvent.click(screen.getByRole("switch", { name: "特訓モード" }));
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
-    fireEvent.click(screen.getByRole("button", { name: /覚えた/ }));
+    fireEvent.click(screen.getByRole("button", { name: /GREAT \/ PERFECT/ }));
     expect(screen.getByText("学習を記録しました")).toBeTruthy();
   });
   it("特訓モードで左・下判定を選ぶと同じ未達成カードを再出題する", async () => {
@@ -90,7 +106,7 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
     fireEvent.click(screen.getByRole("switch", { name: "特訓モード" }));
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
-    fireEvent.click(screen.getByRole("button", { name: /遅答/ }));
+    fireEvent.click(screen.getByRole("button", { name: /ESCAPE \/ AVOID/ }));
     expect(screen.getByText("意味2")).toBeTruthy();
     expect(screen.queryByText("学習を記録しました")).toBeNull();
     await waitFor(() => expect(hooks.recordAnswer).toHaveBeenCalledWith(expect.objectContaining({ practiceRating: "slow" })));
@@ -218,7 +234,7 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
     expect(screen.getByText("判定メーター")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /瞬答/ }));
+    fireEvent.click(screen.getByRole("button", { name: /THINK \/ DELAY/ }));
     expect(screen.getByText("alpha")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "練習モード" }));
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
@@ -245,7 +261,7 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
-    fireEvent.click(screen.getByRole("button", { name: /覚えた/ }));
+    fireEvent.click(screen.getByRole("button", { name: /GREAT \/ PERFECT/ }));
     fireEvent.click(screen.getByRole("button", { name: "終了する" }));
     expect(JSON.parse(window.localStorage.getItem("studyverse-practice-continue") ?? "{}" )).toMatchObject({ version: 1, subject: "英単語", index: 1, result: { known: 1, review: 0 } });
     expect(screen.getByText("保存済みの学習セット")).toBeTruthy();
