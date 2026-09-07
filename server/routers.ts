@@ -41,7 +41,7 @@ function toUserMessage(error: unknown): never {
   throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "処理を完了できませんでした。もう一度お試しください。" });
 }
 
-function getRequestCookie(cookieHeader: string | undefined, name: string) {
+export function getRequestCookie(cookieHeader: string | undefined, name: string) {
   return (cookieHeader ?? "").split(";").map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1);
 }
 
@@ -162,14 +162,14 @@ export const appRouter = router({
       } catch (error) { return toUserMessage(error); }
     }),
     pinMe: publicProcedure.query(async ({ ctx }) => {
-      const token = ctx.req.cookies?.studyverse_pin as string | undefined;
+      const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_pin");
       if (!token) return null;
       const result = await getPinSession(token);
       if (!result) return null;
       return { profile: { id: result.profile.id, userId: result.profile.userId, displayName: result.profile.displayName, avatarUrl: result.profile.avatarUrl, classroomRole: result.profile.classroomRole }, classroom: { id: result.classroom.id, code: result.classroom.code, name: result.classroom.name } };
     }),
     pinLogout: publicProcedure.mutation(async ({ ctx }) => {
-      const token = ctx.req.cookies?.studyverse_pin as string | undefined;
+      const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_pin");
       if (token) await revokePinSession(token);
       const options = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie("studyverse_pin", { ...options, maxAge: -1 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appRouter } from "./routers";
+import { appRouter, getRequestCookie } from "./routers";
 import type { TrpcContext } from "./_core/context";
 
 type CookieCall = {
@@ -41,6 +41,10 @@ function createAuthContext(): { ctx: TrpcContext; clearedCookies: CookieCall[] }
 }
 
 describe("auth.logout", () => {
+  it("restored PIN session reads the token from the raw Cookie header", () => {
+    expect(getRequestCookie("theme=light; studyverse_pin=pin-token-123; other=value", "studyverse_pin")).toBe("pin-token-123");
+    expect(getRequestCookie(undefined, "studyverse_pin")).toBeUndefined();
+  });
   it("clears independent session cookies and reports success", async () => {
     const { ctx, clearedCookies } = createAuthContext();
     const caller = appRouter.createCaller(ctx);

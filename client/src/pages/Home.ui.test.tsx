@@ -20,7 +20,7 @@ vi.mock("@/lib/trpc", () => ({
       dashboard: { useQuery: () => ({ data: { reviewWords: [], unstartedSets: [] } }) },
     },
     useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } }, classroom: { online: { list: { invalidate: hooks.invalidate } }, recommendedTests: { announcements: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate } } } }),
-    auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前", avatarUrl: null } } }) } },
+    auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前", avatarUrl: "/manus-storage/profile-test.png" } } }) } },
     profile: { updateName: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) }, uploadAvatar: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ avatarUrl: "/manus-storage/profile-test.png" }), isPending: false }) } },
     monster: { dashboard: { useQuery: () => ({ data: { eggs: [] } }) } },
     calendar: { dashboard: { useQuery: () => ({ data: { revivalTickets: 2 } }) } },
@@ -141,6 +141,7 @@ describe("学習プロフィール", () => {
     expect(screen.getByText("ユーザーネーム")).toBeTruthy();
     expect(screen.getByTestId("profile-username").textContent).toBe("学習者の名前");
     expect(screen.getByLabelText("プロフィール画像を変更")).toBeTruthy();
+    expect(screen.getByAltText("プロフィール画像").getAttribute("src")).toBe("/manus-storage/profile-test.png");
   });
 
   it("表示名保存時に親画面の保持コールバックへ最新値を渡す", async () => {

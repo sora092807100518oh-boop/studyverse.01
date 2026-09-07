@@ -66,6 +66,17 @@ describe("保存学習セット方式の単語カード", () => {
     expect(screen.getByText("I study alpha every day.")).toBeTruthy();
     expect(screen.queryByText("alpha", { selector: "motion-p" })).toBeNull();
   });
+  it("歯車の詳細は同じカード内で表示し、暗いダイアログを開かない", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: /練習/ }));
+    fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
+    fireEvent.click(screen.getByRole("button", { name: "単語詳細を開く" }));
+    expect(screen.getByText("単語の詳細")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByText("alpha")).toBeTruthy();
+    expect(screen.getByText("最初")).toBeTruthy();
+  });
   it("練習カードの一言メモを保存できる", async () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
