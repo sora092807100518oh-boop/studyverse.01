@@ -57,14 +57,12 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /練習/ }));
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     const card = screen.getByLabelText("単語カードをスワイプ");
-    fireEvent.click(screen.getByRole("button", { name: "例文を見る" }));
-    expect(screen.getByText("私は毎日alphaを勉強します。" as string)).toBeTruthy();
-    expect(screen.queryByText("最初")).toBeNull();
-    fireEvent.click(card);
-    expect(screen.getByText("alpha")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "例文を見る" }));
+    fireEvent.click(screen.getByRole("button", { name: "単語詳細を開く" }));
+    expect(screen.getByText("単語の詳細")).toBeTruthy();
+    expect(screen.getByText("私は毎日alphaを勉強します。")).toBeTruthy();
     expect(screen.getByText("I study alpha every day.")).toBeTruthy();
-    expect(screen.queryByText("alpha", { selector: "motion-p" })).toBeNull();
+    expect(screen.getByText("最初")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "例文を見る" })).toBeNull();
   });
   it("歯車の詳細は同じカード内で表示し、暗いダイアログを開かない", () => {
     render(<CardsWorkspace books={books} />);

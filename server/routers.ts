@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addWordToWordbook, authenticateWithPin, claimAnnouncementRecommendedTest, claimRecommendedWordbook, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, importWordbookCsv, listAnnouncementHistory, listAnnouncementRecommendedTests, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage, uploadVocabularyWordImage } from "./db";
+import { addWordToWordbook, authenticateWithPin, claimAnnouncementRecommendedTest, claimRecommendedWordbook, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, getWordbookCreationPolicy, importWordbookCsv, listAnnouncementHistory, listAnnouncementRecommendedTests, listClassroomMembers, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, setWordbookCreationDisabled, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage, uploadVocabularyWordImage } from "./db";
 import { deleteSavedStudySet, getCalendarDashboard, listClassroomOnlineStatus, listSavedStudySets, listVocabularyWordNotes, resetRevivalTickets, saveStudySet, saveVocabularyWordNote, updateOwnDisplayName, uploadOwnAvatar, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -22,6 +22,7 @@ function toUserMessage(error: unknown): never {
   if (code === "TEST_PERIOD_REQUIRED") throw new TRPCError({ code: "BAD_REQUEST", message: "お知らせ配布では表示終了日時を設定してください。" });
   if (code === "TEST_PERIOD_INVALID") throw new TRPCError({ code: "BAD_REQUEST", message: "表示終了日時は表示開始日時より後に設定してください。" });
   if (code === "WORD_BOOK_DELIVERY_RANGE_INVALID") throw new TRPCError({ code: "BAD_REQUEST", message: "単語帳配布では単語帳全体を選択してください。" });
+  if (code === "WORDBOOK_CREATION_DISABLED") throw new TRPCError({ code: "FORBIDDEN", message: "現在、利用者による新しい単語帳の作成は停止されています。" });
   if (code === "PIN_RATE_LIMITED") throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: "ログイン試行が多すぎます。15分ほど待ってから再試行してください。" });
   if (code === "INVALID_PIN_LOGIN") throw new TRPCError({ code: "UNAUTHORIZED", message: "PINまたは教室コードが正しくありません。" });
   if (code === "TEACHER_ID_NOT_FOUND") throw new TRPCError({ code: "UNAUTHORIZED", message: "先生IDが正しくないか、担当教室が設定されていません。" });
@@ -106,6 +107,10 @@ export const appRouter = router({
       } catch (error) { return toUserMessage(error); }
     }),
     me: publicProcedure.query(({ ctx }) => ctx.user?.role === "admin" ? { id: ctx.user.id, name: ctx.user.name, role: ctx.user.role } : null),
+    wordbookCreationPolicy: protectedProcedure.query(async () => getWordbookCreationPolicy()),
+    setWordbookCreationDisabled: protectedProcedure.input(z.object({ disabled: z.boolean() })).mutation(async ({ ctx, input }) => {
+      try { return await setWordbookCreationDisabled(ctx.user.id, input.disabled); } catch (error) { return toUserMessage(error); }
+    }),
     logout: publicProcedure.mutation(async ({ ctx }) => {
       const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_admin");
       if (token) await revokeSiteAdminSession(token);
@@ -228,7 +233,7 @@ export const appRouter = router({
     addWord: protectedProcedure.input(z.object({ wordbookId: z.number().int().positive(), front: z.string().trim().min(1).max(500), back: z.string().trim().min(1).max(500), reading: z.string().trim().max(500).optional(), source: z.enum(["manual", "csv", "admin"]).optional() })).mutation(async ({ ctx, input }) => {
       try { return await addWordToWordbook(ctx.user.id, input); } catch (error) { return toUserMessage(error); }
     }),
-    updateWord: protectedProcedure.input(z.object({ vocabularyWordId: z.number().int().positive(), front: z.string().trim().min(1).max(500).optional(), back: z.string().trim().min(1).max(500).optional(), reading: z.string().trim().max(500).nullable().optional(), imageUrl: z.string().url().max(2048).nullable().optional(), exampleSentence: z.string().trim().max(1200).nullable().optional(), exampleTranslation: z.string().trim().max(1200).nullable().optional() })).mutation(async ({ ctx, input }) => {
+    updateWord: protectedProcedure.input(z.object({ vocabularyWordId: z.number().int().positive(), front: z.string().trim().min(1).max(500).optional(), back: z.string().trim().min(1).max(500).optional(), reading: z.string().trim().max(500).nullable().optional(), imageUrl: z.string().max(2048).refine(value => /^https?:\/\//i.test(value) || value.startsWith("/manus-storage/"), "Invalid URL").nullable().optional(), exampleSentence: z.string().trim().max(1200).nullable().optional(), exampleTranslation: z.string().trim().max(1200).nullable().optional() })).mutation(async ({ ctx, input }) => {
       const { vocabularyWordId, ...update } = input;
       try { await updateVocabularyWord(ctx.user.id, vocabularyWordId, update); return { success: true }; } catch (error) { return toUserMessage(error); }
     }),

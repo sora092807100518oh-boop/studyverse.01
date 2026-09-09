@@ -22,6 +22,7 @@ vi.mock("@/lib/trpc", () => ({
         update: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
         delete: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
       },
+      recommendedTests: { create: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ targetCount: 1 }), isPending: false }) }, manage: { useQuery: () => ({ data: [], isLoading: false, isError: false }) }, list: { useQuery: () => ({ data: [], isLoading: false }) }, announcements: { useQuery: () => ({ data: [], isLoading: false }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
     },
     wordbooks: {
       managed: { useQuery: () => ({ data: hooks.managedBooks, isLoading: false, isError: false }) },

@@ -50,6 +50,7 @@ vi.mock("@/lib/trpc", () => ({
       recommendedTests: {
         announcements: { useQuery: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }) },
         claim: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
+        claimWordbook: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
       },
     },
   },

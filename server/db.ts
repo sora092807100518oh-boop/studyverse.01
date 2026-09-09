@@ -2,7 +2,7 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "dri
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import webpush from "web-push";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -295,6 +295,25 @@ export async function requireGlobalAdmin(userId: number) {
   const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
   const profile = await getProfile(userId);
   if (account[0]?.role !== "admin" && profile?.profile.classroomRole !== "owner") throw new Error("GLOBAL_MANAGER_REQUIRED");
+}
+
+const WORD_BOOK_CREATION_SETTING_KEY = "wordbookCreationDisabled";
+
+export async function getWordbookCreationPolicy() {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const row = await db.select({ value: siteSettings.value }).from(siteSettings).where(eq(siteSettings.key, WORD_BOOK_CREATION_SETTING_KEY)).limit(1);
+  return { disabled: row[0]?.value === "true" };
+}
+
+export async function setWordbookCreationDisabled(userId: number, disabled: boolean) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await requireGlobalAdmin(userId);
+  const existing = await db.select({ key: siteSettings.key }).from(siteSettings).where(eq(siteSettings.key, WORD_BOOK_CREATION_SETTING_KEY)).limit(1);
+  if (existing[0]) await db.update(siteSettings).set({ value: disabled ? "true" : "false" }).where(eq(siteSettings.key, WORD_BOOK_CREATION_SETTING_KEY));
+  else await db.insert(siteSettings).values({ key: WORD_BOOK_CREATION_SETTING_KEY, value: disabled ? "true" : "false" });
+  return { disabled };
 }
 
 export async function listClassroomsForUser(userId: number, query?: string) {
@@ -680,6 +699,8 @@ export async function createWordbook(userId: number, input: { title: string; sub
   const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
   const isAdmin = account[0]?.role === "admin";
   const isManager = profile?.profile.classroomRole === "teacher" || profile?.profile.classroomRole === "owner";
+  const creationPolicy = await getWordbookCreationPolicy();
+  if (creationPolicy.disabled && !isAdmin && !isManager) throw new Error("WORDBOOK_CREATION_DISABLED");
   if ((input.visibility === "classroom" || input.visibility === "global") && !isAdmin && !isManager) throw new Error(profile ? "CLASSROOM_MANAGER_REQUIRED" : "CLASSROOM_REQUIRED");
   if (input.visibility === "global" && !isAdmin) throw new Error("GLOBAL_MANAGER_REQUIRED");
   const classroomId = input.visibility === "global" ? null : input.visibility === "classroom" ? (isAdmin ? input.classroomId : profile?.profile.classroomId) : profile?.profile.classroomId ?? null;

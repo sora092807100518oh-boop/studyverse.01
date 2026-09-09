@@ -4,6 +4,7 @@ import React from "react";
 
 const hooks = vi.hoisted(() => ({
   useTicket: vi.fn().mockResolvedValue({ success: true }),
+  createEvent: vi.fn().mockResolvedValue({ success: true }),
   invalidateDashboard: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -16,6 +17,7 @@ vi.mock("@/lib/trpc", () => ({
       dashboard: { useQuery: () => ({ data: { revivalTickets: 2, futureEvents: [], days: [{ dateKey: dateKey(new Date()), focusSeconds: 60, answers: 2, events: [], revived: false }] }, isLoading: false }) },
       useRevivalTicket: { useMutation: () => ({ mutateAsync: hooks.useTicket, isPending: false }) },
     },
+    classroom: { calendar: { create: { useMutation: () => ({ mutateAsync: hooks.createEvent, isPending: false }) } } },
   },
 }));
 
