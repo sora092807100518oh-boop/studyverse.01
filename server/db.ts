@@ -186,15 +186,23 @@ export async function resetPinForProfile(actorUserId: number, input: { profileId
   await writeActivity({ actorUserId, classroomId: target[0].classroomId, category: "member", action: "pin.reset", details: `profile:${input.profileId}` });
 }
 
-export async function authenticateWithPin(input: { classroomCode: string; pin: string; clientFingerprint: string }) {
+export async function authenticateWithPin(input: { classroomCode: string; pin: string; clientFingerprint: string; personalClientId?: string }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const normalizedCode = input.classroomCode.trim().toUpperCase();
-  const attemptKeyHash = getAttemptKeyHash(normalizedCode, input.clientFingerprint, getPinPepper());
+  const personalCodes = await getPersonalClassroomCodes(db);
+  const isPersonalCode = personalCodes.includes(normalizedCode);
+  const personalIdentity = `${input.personalClientId?.trim() || input.clientFingerprint}:${input.pin}`;
+  const isolatedCode = isPersonalCode ? `P-${getAttemptKeyHash(normalizedCode, personalIdentity, getPinPepper()).slice(0, 16)}` : normalizedCode;
+  const attemptKeyHash = getAttemptKeyHash(isolatedCode, input.clientFingerprint, getPinPepper());
   const after = new Date(Date.now() - PIN_ATTEMPT_WINDOW_MS);
   const recent = await db.select().from(pinLoginAttempts).where(and(eq(pinLoginAttempts.attemptKeyHash, attemptKeyHash), gte(pinLoginAttempts.attemptedAt, after)));
   if (recent.filter(attempt => !attempt.succeeded).length >= MAX_PIN_ATTEMPTS) throw new Error("PIN_RATE_LIMITED");
-  const classroom = await db.select().from(classrooms).where(eq(classrooms.code, normalizedCode)).limit(1);
+  let classroom = await db.select().from(classrooms).where(eq(classrooms.code, isolatedCode)).limit(1);
+  if (!classroom[0] && isPersonalCode) {
+    const created = await db.insert(classrooms).values({ code: isolatedCode, name: "個人利用", teacherUserId: null }).$returningId();
+    if (created[0]?.id) classroom = await db.select().from(classrooms).where(eq(classrooms.id, created[0].id)).limit(1);
+  }
   const lookupHash = classroom[0] ? getPinLookupHash(classroom[0].id, input.pin, getPinPepper()) : "";
   let profile = classroom[0] ? await db.select().from(studentProfiles).where(and(eq(studentProfiles.classroomId, classroom[0].id), eq(studentProfiles.pinLookupHash, lookupHash))).limit(1) : [];
   let valid = !!profile[0] && await verifyPin(input.pin, profile[0].pinHash);
@@ -298,6 +306,55 @@ export async function requireGlobalAdmin(userId: number) {
 }
 
 const WORD_BOOK_CREATION_SETTING_KEY = "wordbookCreationDisabled";
+const PERSONAL_CLASSROOM_CODES_SETTING_KEY = "personalClassroomCodes";
+
+function parsePersonalClassroomCodes(value?: string | null) {
+  if (!value) return [] as string[];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? Array.from(new Set(parsed.filter((code): code is string => typeof code === "string").map(code => code.trim().toUpperCase()).filter(code => /^[A-Z0-9-]{3,32}$/.test(code)))) : [];
+  } catch { return []; }
+}
+
+async function getPersonalClassroomCodes(db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+  const row = await db.select({ value: siteSettings.value }).from(siteSettings).where(eq(siteSettings.key, PERSONAL_CLASSROOM_CODES_SETTING_KEY)).limit(1);
+  return parsePersonalClassroomCodes(row[0]?.value);
+}
+
+export async function listPersonalClassroomCodes(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await requireGlobalAdmin(userId);
+  return getPersonalClassroomCodes(db);
+}
+
+export async function addPersonalClassroomCode(userId: number, code: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await requireGlobalAdmin(userId);
+  const normalized = code.trim().toUpperCase();
+  if (!/^[A-Z0-9-]{3,32}$/.test(normalized)) throw new Error("INVALID_CLASSROOM_CODE");
+  const existingClassroom = await db.select({ id: classrooms.id }).from(classrooms).where(eq(classrooms.code, normalized)).limit(1);
+  if (existingClassroom[0]) throw new Error("CLASSROOM_CODE_ALREADY_USED");
+  const codes = await getPersonalClassroomCodes(db);
+  if (codes.includes(normalized)) return { code: normalized, codes };
+  const nextCodes = [...codes, normalized];
+  const row = await db.select({ key: siteSettings.key }).from(siteSettings).where(eq(siteSettings.key, PERSONAL_CLASSROOM_CODES_SETTING_KEY)).limit(1);
+  if (row[0]) await db.update(siteSettings).set({ value: JSON.stringify(nextCodes) }).where(eq(siteSettings.key, PERSONAL_CLASSROOM_CODES_SETTING_KEY));
+  else await db.insert(siteSettings).values({ key: PERSONAL_CLASSROOM_CODES_SETTING_KEY, value: JSON.stringify(nextCodes) });
+  return { code: normalized, codes: nextCodes };
+}
+
+export async function removePersonalClassroomCode(userId: number, code: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await requireGlobalAdmin(userId);
+  const normalized = code.trim().toUpperCase();
+  const nextCodes = (await getPersonalClassroomCodes(db)).filter(item => item !== normalized);
+  const row = await db.select({ key: siteSettings.key }).from(siteSettings).where(eq(siteSettings.key, PERSONAL_CLASSROOM_CODES_SETTING_KEY)).limit(1);
+  if (row[0]) await db.update(siteSettings).set({ value: JSON.stringify(nextCodes) }).where(eq(siteSettings.key, PERSONAL_CLASSROOM_CODES_SETTING_KEY));
+  return { codes: nextCodes };
+}
 
 export async function getWordbookCreationPolicy() {
   const db = await getDb();

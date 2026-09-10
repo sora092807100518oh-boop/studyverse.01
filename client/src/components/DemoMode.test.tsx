@@ -26,7 +26,11 @@ describe("お試しモード", () => {
     fireEvent.click(screen.getByText("お試し英単語帳 基礎セット"));
     fireEvent.click(screen.getByRole("button", { name: "練習" }));
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
-    expect(screen.getByText("右へスワイプで覚えた、左へスワイプで次へ")).toBeTruthy();
+    expect(screen.getByText(/右 GREAT \/ PERFECT・左 MISS \/ BAD・下 ESCAPE \/ AVOID・上 THINK \/ DELAY/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /左.*MISS \/ BAD/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /右.*GREAT \/ PERFECT/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /上.*THINK \/ DELAY/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /下.*ESCAPE \/ AVOID/ })).toBeTruthy();
   });
 
   it("カレンダーを利用不可と案内し、保存されないことを表示する", () => {
