@@ -57,9 +57,11 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: "一覧" }));
     expect(screen.getByText("一覧")).toBeTruthy();
     expect(screen.getByText("最初")).toBeTruthy();
-    expect(screen.getByText("alpha").classList.contains("text-transparent")).toBe(true);
+    expect(screen.getByRole("button", { name: "alphaを表示" }).classList.contains("text-transparent")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "alphaを表示" }));
-    expect(screen.getByText("alpha").classList.contains("text-slate-100")).toBe(true);
+    expect(screen.getByRole("button", { name: "alphaを隠す" }).classList.contains("text-slate-100")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "alphaを隠す" }));
+    expect(screen.getByRole("button", { name: "alphaを表示" })).toBeTruthy();
   });
   it("一覧の英語ごとに音声ボタンを表示する", () => {
     render(<CardsWorkspace books={books} />);
@@ -67,6 +69,18 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: "一覧" }));
     expect(screen.getByRole("button", { name: "alphaの音声を再生" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "word-2の音声を再生" })).toBeTruthy();
+  });
+  it("英語と意味を一括で隠し、ボタンでもう一度全て表示できる", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: "一覧" }));
+    fireEvent.click(screen.getByRole("button", { name: "英語を全て表示" }));
+    expect(screen.getByRole("button", { name: "英語を全て隠す" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "alphaを隠す" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "意味を全て隠す" }));
+    expect(screen.getByRole("button", { name: "最初を表示" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "意味を全て表示" }));
+    expect(screen.getByRole("button", { name: "最初を隠す" })).toBeTruthy();
   });
   it("例文表示は現在のカード面を置き換え、カードを裏返すと英単語と意味へ戻る", () => {
     render(<CardsWorkspace books={books} />);
