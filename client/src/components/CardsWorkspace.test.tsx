@@ -51,6 +51,23 @@ describe("保存学習セット方式の単語カード", () => {
     fireEvent.click(screen.getByRole("button", { name: /この設定で練習する/ }));
     expect(screen.getByText("最初")).toBeTruthy();
   });
+  it("保存済みセットの一覧で英語を伏せ、タップで表示できる", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: "一覧" }));
+    expect(screen.getByText("一覧")).toBeTruthy();
+    expect(screen.getByText("最初")).toBeTruthy();
+    expect(screen.getByText("alpha").classList.contains("text-transparent")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "alphaを表示" }));
+    expect(screen.getByText("alpha").classList.contains("text-slate-100")).toBe(true);
+  });
+  it("一覧の英語ごとに音声ボタンを表示する", () => {
+    render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
+    fireEvent.click(screen.getByRole("button", { name: "一覧" }));
+    expect(screen.getByRole("button", { name: "alphaの音声を再生" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "word-2の音声を再生" })).toBeTruthy();
+  });
   it("例文表示は現在のカード面を置き換え、カードを裏返すと英単語と意味へ戻る", () => {
     render(<CardsWorkspace books={books} />);
     fireEvent.click(screen.getByText("英語第1章 第1〜20語"));
