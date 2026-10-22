@@ -231,6 +231,36 @@ export const savedStudySets = mysqlTable("savedStudySets", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const marketItems = mysqlTable("marketItems", {
+  id: int("id").autoincrement().primaryKey(),
+  ownerUserId: int("ownerUserId").notNull(),
+  wordbookId: int("wordbookId").notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  imageUrl: varchar("imageUrl", { length: 2048 }).notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  reviewNote: varchar("reviewNote", { length: 500 }),
+  reviewedAt: timestamp("reviewedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const marketDownloads = mysqlTable("marketDownloads", {
+  id: int("id").autoincrement().primaryKey(),
+  marketItemId: int("marketItemId").notNull(),
+  userId: int("userId").notNull(),
+  downloadedWordbookId: int("downloadedWordbookId").notNull(),
+  downloadedAt: timestamp("downloadedAt").defaultNow().notNull(),
+}, table => [uniqueIndex("market_downloads_item_user_unique").on(table.marketItemId, table.userId)]);
+
+export const marketReviews = mysqlTable("marketReviews", {
+  id: int("id").autoincrement().primaryKey(),
+  marketItemId: int("marketItemId").notNull(),
+  userId: int("userId").notNull(),
+  stars: int("stars").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+}, table => [uniqueIndex("market_reviews_item_user_unique").on(table.marketItemId, table.userId)]);
+
 export const revivalDays = mysqlTable("revivalDays", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),

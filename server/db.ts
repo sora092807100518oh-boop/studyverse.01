@@ -2,7 +2,7 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "dri
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import webpush from "web-push";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketDownloads, marketItems, marketReviews, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -1373,4 +1373,92 @@ export async function sendSmartNotificationNow(userId: number) {
   const settings = await getSmartNotificationSettings(userId);
   if (!settings) return { sent: 0, skipped: "not_found" } as const;
   return sendSmartNotificationForSettings(settings, { ignoreTimeWindow: true });
+}
+
+
+async function assertSiteAdmin(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+  if (account[0]?.role !== "admin") throw new Error("GLOBAL_MANAGER_REQUIRED");
+  return db;
+}
+
+async function decorateMarketItem(userId: number, item: typeof marketItems.$inferSelect, db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
+  const [source, reviews, download] = await Promise.all([
+    db.select({ title: wordbooks.title, subject: wordbooks.subject }).from(wordbooks).where(eq(wordbooks.id, item.wordbookId)).limit(1),
+    db.select({ stars: marketReviews.stars, userId: marketReviews.userId }).from(marketReviews).where(eq(marketReviews.marketItemId, item.id)),
+    db.select({ id: marketDownloads.id }).from(marketDownloads).where(and(eq(marketDownloads.marketItemId, item.id), eq(marketDownloads.userId, userId))).limit(1),
+  ]);
+  const averageStars = reviews.length ? Math.round((reviews.reduce((sum, review) => sum + review.stars, 0) / reviews.length) * 10) / 10 : 0;
+  const ownReview = reviews.find(review => review.userId === userId)?.stars ?? null;
+  return { ...item, sourceTitle: source[0]?.title ?? item.name, subject: source[0]?.subject ?? "english", reviewCount: reviews.length, averageStars, downloaded: Boolean(download[0]), ownReview };
+}
+
+export async function listMarketItems(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(marketItems).where(eq(marketItems.status, "approved")).orderBy(desc(marketItems.createdAt));
+  return Promise.all(rows.map(item => decorateMarketItem(userId, item, db)));
+}
+
+export async function submitMarketItem(userId: number, input: { wordbookId: number; name: string; dataUrl: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const source = await db.select().from(wordbooks).where(and(eq(wordbooks.id, input.wordbookId), eq(wordbooks.ownerUserId, userId), eq(wordbooks.visibility, "private"))).limit(1);
+  if (!source[0]) throw new Error("MARKET_WORDBOOK_FORBIDDEN");
+  const words = await db.select({ id: vocabularyWords.id }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, input.wordbookId)).limit(1);
+  if (!words[0]) throw new Error("MARKET_WORDBOOK_EMPTY");
+  const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-zA-Z0-9+/=]+)$/.exec(input.dataUrl);
+  if (!match) throw new Error("MARKET_IMAGE_INVALID");
+  const contentType = match[1];
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 5_000_000) throw new Error("MARKET_IMAGE_INVALID");
+  const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const uploaded = await storagePut(`market/${userId}/${randomUUID()}.${extension}`, buffer, contentType);
+  const inserted = await db.insert(marketItems).values({ ownerUserId: userId, wordbookId: input.wordbookId, name: input.name.trim(), imageUrl: uploaded.url, status: "pending" }).$returningId();
+  await writeActivity({ actorUserId: userId, category: "classroom", action: "market.submitted", details: input.name.trim() });
+  return { id: inserted[0]?.id, status: "pending" as const };
+}
+
+export async function listMarketModerationItems(userId: number) {
+  const db = await assertSiteAdmin(userId);
+  const rows = await db.select({ item: marketItems, ownerName: users.name }).from(marketItems).innerJoin(users, eq(marketItems.ownerUserId, users.id)).orderBy(desc(marketItems.createdAt));
+  return Promise.all(rows.map(async row => ({ ...(await decorateMarketItem(userId, row.item, db)), ownerName: row.ownerName })));
+}
+
+export async function moderateMarketItem(userId: number, input: { marketItemId: number; status: "approved" | "rejected"; reviewNote?: string }) {
+  const db = await assertSiteAdmin(userId);
+  const item = await db.select().from(marketItems).where(eq(marketItems.id, input.marketItemId)).limit(1);
+  if (!item[0]) throw new Error("MARKET_ITEM_NOT_FOUND");
+  await db.update(marketItems).set({ status: input.status, reviewNote: input.reviewNote?.trim() || null, reviewedAt: new Date() }).where(eq(marketItems.id, input.marketItemId));
+  await writeActivity({ actorUserId: userId, category: "classroom", action: `market.${input.status}`, details: item[0].name });
+  return { success: true } as const;
+}
+
+export async function downloadMarketItem(userId: number, marketItemId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const item = (await db.select().from(marketItems).where(and(eq(marketItems.id, marketItemId), eq(marketItems.status, "approved"))).limit(1))[0];
+  if (!item) throw new Error("MARKET_ITEM_NOT_FOUND");
+  const existing = (await db.select().from(marketDownloads).where(and(eq(marketDownloads.marketItemId, marketItemId), eq(marketDownloads.userId, userId))).limit(1))[0];
+  if (existing) return { downloadedWordbookId: existing.downloadedWordbookId, alreadyDownloaded: true };
+  const source = (await db.select().from(wordbooks).where(eq(wordbooks.id, item.wordbookId)).limit(1))[0];
+  if (!source) throw new Error("MARKET_ITEM_NOT_FOUND");
+  const profile = await getProfile(userId);
+  const cloned = await db.insert(wordbooks).values({ title: item.name, subject: source.subject, visibility: "private", ownerUserId: userId, classroomId: profile?.profile.classroomId ?? null }).$returningId();
+  const words = await db.select({ front: vocabularyWords.front, back: vocabularyWords.back, reading: vocabularyWords.reading, imageUrl: vocabularyWords.imageUrl, exampleSentence: vocabularyWords.exampleSentence, exampleTranslation: vocabularyWords.exampleTranslation }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, source.id)).orderBy(vocabularyWords.id);
+  if (words.length) await db.insert(vocabularyWords).values(words.map(word => ({ ...word, wordbookId: cloned[0].id, source: "admin" as const })));
+  await db.insert(marketDownloads).values({ marketItemId, userId, downloadedWordbookId: cloned[0].id });
+  await writeActivity({ actorUserId: userId, classroomId: profile?.profile.classroomId, category: "classroom", action: "market.downloaded", details: item.name });
+  return { downloadedWordbookId: cloned[0].id, alreadyDownloaded: false };
+}
+
+export async function saveMarketReview(userId: number, input: { marketItemId: number; stars: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const downloaded = await db.select({ id: marketDownloads.id }).from(marketDownloads).where(and(eq(marketDownloads.marketItemId, input.marketItemId), eq(marketDownloads.userId, userId))).limit(1);
+  if (!downloaded[0]) throw new Error("MARKET_REVIEW_DOWNLOAD_REQUIRED");
+  await db.insert(marketReviews).values({ marketItemId: input.marketItemId, userId, stars: input.stars }).onDuplicateKeyUpdate({ set: { stars: input.stars, updatedAt: new Date() } });
+  return { success: true } as const;
 }
