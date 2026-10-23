@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { addPersonalClassroomCode, addWordToWordbook, authenticateWithPin, claimAnnouncementRecommendedTest, claimRecommendedWordbook, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, getWordbookCreationPolicy, importWordbookCsv, listAnnouncementHistory, listAnnouncementRecommendedTests, listClassroomMembers, listMarketItems, listMarketModerationItems, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listPersonalClassroomCodes, removePersonalClassroomCode, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveMarketReview, submitMarketItem, moderateMarketItem, downloadMarketItem,     setWordbookCreationDisabled, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage, uploadVocabularyWordImage } from "./db";
+import { addPersonalClassroomCode, addWordToWordbook, authenticateWithOAuth, authenticateWithPin, claimAnnouncementRecommendedTest, claimRecommendedWordbook, claimAvailableMonsterMissions, claimMonsterMission, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, getWordbookCreationPolicy, getLoginBackground, importWordbookCsv, listAnnouncementHistory, listAnnouncementRecommendedTests, listClassroomMembers, listMarketItems, listMarketModerationItems, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMonsterImageSettings, listPersonalClassroomCodes, removePersonalClassroomCode, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, uploadLoginBackground, clearLoginBackground, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveMarketReview, submitMarketItem, moderateMarketItem, downloadMarketItem,     setWordbookCreationDisabled, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMonsterImage, uploadVocabularyWordImage } from "./db";
 import { deleteSavedStudySet, getCalendarDashboard, listClassroomOnlineStatus, listSavedStudySets, listVocabularyWordNotes, resetRevivalTickets, saveStudySet, saveVocabularyWordNote, updateOwnDisplayName, uploadOwnAvatar, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -12,6 +12,8 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 function toUserMessage(error: unknown): never {
   const code = error instanceof Error ? error.message : "";
   if (code === "CLASSROOM_REQUIRED") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "教室への参加を完了してから利用してください。" });
+  if (code === "CLASSROOM_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "学校コードが見つかりません。入力内容を確認してください。" });
+  if (code === "LOGIN_BACKGROUND_INVALID") throw new TRPCError({ code: "BAD_REQUEST", message: "背景画像は5MB以下のPNG・JPEG・WebPを指定してください。" });
   if (code === "WORD_BOOK_FORBIDDEN") throw new TRPCError({ code: "FORBIDDEN", message: "この単語帳を編集する権限がありません。" });
   if (code === "INVALID_CLASSROOM_CODE") throw new TRPCError({ code: "BAD_REQUEST", message: "個人利用コードは英数字とハイフンの3〜32文字で入力してください。" });
   if (code === "CLASSROOM_CODE_ALREADY_USED") throw new TRPCError({ code: "CONFLICT", message: "そのコードは既存の教室で使用されています。" });
@@ -101,6 +103,11 @@ export const appRouter = router({
       }
     }),
   }),
+  siteConfig: router({
+    loginBackground: publicProcedure.query(() => getLoginBackground()),
+    uploadLoginBackground: protectedProcedure.input(z.object({ dataUrl: z.string().max(7_000_000) })).mutation(async ({ ctx, input }) => { try { return await uploadLoginBackground(ctx.user.id, input.dataUrl); } catch (error) { return toUserMessage(error); } }),
+    clearLoginBackground: protectedProcedure.mutation(async ({ ctx }) => { try { return await clearLoginBackground(ctx.user.id); } catch (error) { return toUserMessage(error); } }),
+  }),
   system: systemRouter,
   siteAdmin: router({
     check: publicProcedure.input(z.object({ password: z.string().min(1).max(256) })).query(({ input }) => ({ valid: verifySiteAdminPassword(input.password) })),
@@ -177,6 +184,9 @@ export const appRouter = router({
         ctx.res.cookie("studyverse_pin", result.token, { ...options, maxAge: 30 * 24 * 60 * 60 * 1000 });
         return { profile: result.profile, classroom: result.classroom, expiresAt: result.expiresAt };
       } catch (error) { return toUserMessage(error); }
+    }),
+    oauthClassroomLogin: protectedProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/).optional() })).mutation(async ({ ctx, input }) => {
+      try { const result = await authenticateWithOAuth(ctx.user.id, input); const options = getSessionCookieOptions(ctx.req); ctx.res.cookie("studyverse_pin", result.token, { ...options, maxAge: 30 * 24 * 60 * 60 * 1000 }); return { profile: result.profile, classroom: result.classroom, expiresAt: result.expiresAt }; } catch (error) { return toUserMessage(error); }
     }),
     pinMe: publicProcedure.query(async ({ ctx }) => {
       const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_pin");

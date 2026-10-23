@@ -1,6 +1,7 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import { getPinSession, getSiteAdminSession, getTeacherAdminSession, getUserById } from "../db";
+import { sdk } from "./sdk";
 
 export type TrpcContext = {
   req: CreateExpressContextOptions["req"];
@@ -32,6 +33,10 @@ export async function createContext(
         if (session) user = await getUserById(session.session.userId) ?? null;
       } catch (error) { console.warn("[PIN Auth] Session lookup failed", String(error)); }
     }
+  }
+
+  if (!user) {
+    try { user = await sdk.authenticateRequest(opts.req); } catch { /* OAuth session is optional on the public login screen. */ }
   }
 
   return {

@@ -1462,3 +1462,74 @@ export async function saveMarketReview(userId: number, input: { marketItemId: nu
   await db.insert(marketReviews).values({ marketItemId: input.marketItemId, userId, stars: input.stars }).onDuplicateKeyUpdate({ set: { stars: input.stars, updatedAt: new Date() } });
   return { success: true } as const;
 }
+
+
+const LOGIN_BACKGROUND_SETTING_KEY = "loginBackgroundUrl";
+
+export async function getLoginBackground() {
+  const db = await getDb();
+  if (!db) return { imageUrl: null as string | null };
+  const row = await db.select({ value: siteSettings.value }).from(siteSettings).where(eq(siteSettings.key, LOGIN_BACKGROUND_SETTING_KEY)).limit(1);
+  return { imageUrl: row[0]?.value || null };
+}
+
+export async function uploadLoginBackground(userId: number, dataUrl: string) {
+  await requireGlobalAdmin(userId);
+  const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-zA-Z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) throw new Error("LOGIN_BACKGROUND_INVALID");
+  const contentType = match[1];
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 5_000_000) throw new Error("LOGIN_BACKGROUND_INVALID");
+  const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const uploaded = await storagePut(`settings/login-background-${randomUUID()}.${extension}`, buffer, contentType);
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const existing = await db.select({ key: siteSettings.key }).from(siteSettings).where(eq(siteSettings.key, LOGIN_BACKGROUND_SETTING_KEY)).limit(1);
+  if (existing[0]) await db.update(siteSettings).set({ value: uploaded.url }).where(eq(siteSettings.key, LOGIN_BACKGROUND_SETTING_KEY));
+  else await db.insert(siteSettings).values({ key: LOGIN_BACKGROUND_SETTING_KEY, value: uploaded.url });
+  await writeActivity({ actorUserId: userId, category: "classroom", action: "site.login_background_updated" });
+  return { imageUrl: uploaded.url };
+}
+
+export async function clearLoginBackground(userId: number) {
+  await requireGlobalAdmin(userId);
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await db.delete(siteSettings).where(eq(siteSettings.key, LOGIN_BACKGROUND_SETTING_KEY));
+  return { imageUrl: null as string | null };
+}
+
+export async function authenticateWithOAuth(userId: number, input: { classroomCode?: string }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!account[0]) throw new Error("PROFILE_NOT_FOUND");
+  let classroom;
+  const normalizedCode = input.classroomCode?.trim().toUpperCase();
+  if (normalizedCode) {
+    classroom = (await db.select().from(classrooms).where(eq(classrooms.code, normalizedCode)).limit(1))[0];
+    if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
+  } else {
+    const personalCode = `OAUTH-${userId}`;
+    classroom = (await db.select().from(classrooms).where(eq(classrooms.code, personalCode)).limit(1))[0];
+    if (!classroom) {
+      const created = await db.insert(classrooms).values({ code: personalCode, name: "個人学習", teacherUserId: null }).$returningId();
+      classroom = created[0]?.id ? (await db.select().from(classrooms).where(eq(classrooms.id, created[0].id)).limit(1))[0] : undefined;
+    }
+  }
+  if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
+  let profile = (await db.select().from(studentProfiles).where(and(eq(studentProfiles.userId, userId), eq(studentProfiles.classroomId, classroom.id))).limit(1))[0];
+  if (!profile) {
+    const internalSecret = `oauth-${randomUUID()}`;
+    const pinHash = await hashPin(internalSecret);
+    const pinLookupHash = getPinLookupHash(classroom.id, internalSecret, getPinPepper());
+    const created = await db.insert(studentProfiles).values({ userId, classroomId: classroom.id, pinHash, pinLookupHash, displayName: account[0].name ?? "学習者", classroomRole: "student" }).$returningId();
+    if (created[0]?.id) profile = (await db.select().from(studentProfiles).where(eq(studentProfiles.id, created[0].id)).limit(1))[0] ?? profile;
+  }
+  if (!profile) throw new Error("ACCOUNT_CREATE_FAILED");
+  const token = createSessionToken();
+  const expiresAt = new Date(Date.now() + PIN_SESSION_TTL_MS);
+  await db.insert(pinSessions).values({ tokenHash: getSessionTokenHash(token, getPinPepper()), profileId: profile.id, userId, classroomId: classroom.id, expiresAt });
+  await writeActivity({ actorUserId: userId, classroomId: classroom.id, category: "learning", action: "login.success", details: normalizedCode ? "oauth-school" : "oauth-personal" });
+  return { token, expiresAt, profile: { id: profile.id, userId: profile.userId, displayName: profile.displayName, avatarUrl: profile.avatarUrl, classroomRole: profile.classroomRole }, classroom: { id: classroom.id, code: classroom.code, name: classroom.name } };
+}
