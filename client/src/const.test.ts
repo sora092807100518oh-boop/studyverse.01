@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildOAuthLoginUrl } from "./const";
+import { buildOAuthLoginUrl, OAUTH_ENTRY_INTENT_KEY } from "./const";
 import { decodeOAuthState } from "@shared/const";
 
 describe("OAuthログインURL", () => {
@@ -15,5 +15,9 @@ describe("OAuthログインURL", () => {
 
   it("壊れたstateはnonceなしとして扱う", () => {
     expect(decodeOAuthState("not-valid-state")).toEqual({ redirectUri: "" });
+  });
+
+  it("学校IDの保存キーはGoogle・Apple選択後の入室情報に使える", () => {
+    expect(OAUTH_ENTRY_INTENT_KEY).toBe("studyverse-oauth-entry-intent");
   });
 });

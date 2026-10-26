@@ -69,7 +69,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { BookDetail, CardsView, Header, HomeView, ProfileControls, TimerCard, TimerStrip, isLearnerOnlyBook } from "./Home";
+import { BookDetail, CardsView, Header, HomeView, LoginGate, ProfileControls, TimerCard, TimerStrip, isLearnerOnlyBook } from "./Home";
 
 const books = {
   英単語: [{
@@ -109,6 +109,42 @@ afterEach(() => {
   hooks.announcements = [];
   hooks.sendTestResult = { sent: 1 };
   window.localStorage.clear();
+});
+
+describe("OAuthログイン画面", () => {
+  const gateProps = {
+    oauthUser: null,
+    onEnter: vi.fn().mockResolvedValue(undefined),
+    onPersonalEnter: vi.fn().mockResolvedValue(undefined),
+    onOAuthLogin: vi.fn(),
+    onAdminEnter: vi.fn(),
+    onTeacherEnter: vi.fn(),
+  };
+
+  it("学校IDを先に入力し、GoogleとAppleを分けて選択できる", () => {
+    render(<LoginGate {...gateProps} />);
+    expect(screen.getByText("① school id")).toBeTruthy();
+    expect(screen.getByText("学校IDを入力")).toBeTruthy();
+    expect(screen.getByText("学校IDがなければ、空欄のまま個人利用として進められます。")).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText("例：STAR-2026"), { target: { value: "school-2026" } });
+    fireEvent.click(screen.getByRole("button", { name: /Google/ }));
+    expect(gateProps.onOAuthLogin).toHaveBeenCalledWith({ schoolId: "SCHOOL-2026", provider: "google" });
+    fireEvent.click(screen.getByRole("button", { name: /Apple/ }));
+    expect(gateProps.onOAuthLogin).toHaveBeenLastCalledWith({ schoolId: "SCHOOL-2026", provider: "apple" });
+  });
+
+  it("OAuth後は学校IDがあれば学校へ、空欄なら個人利用へ進める", async () => {
+    const onEnter = vi.fn().mockResolvedValue(undefined);
+    const onPersonalEnter = vi.fn().mockResolvedValue(undefined);
+    const { rerender } = render(<LoginGate {...gateProps} onEnter={onEnter} onPersonalEnter={onPersonalEnter} oauthUser={{ name: "テスト利用者" }} />);
+    fireEvent.change(screen.getByPlaceholderText("例：STAR-2026"), { target: { value: "STAR-2026" } });
+    fireEvent.click(screen.getByRole("button", { name: "学校IDでログイン" }));
+    await waitFor(() => expect(onEnter).toHaveBeenCalledWith("STAR-2026"));
+    fireEvent.change(screen.getByPlaceholderText("例：STAR-2026"), { target: { value: "" } });
+    rerender(<LoginGate {...gateProps} onEnter={onEnter} onPersonalEnter={onPersonalEnter} oauthUser={{ name: "テスト利用者" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "個人利用でログイン" }));
+    await waitFor(() => expect(onPersonalEnter).toHaveBeenCalledTimes(1));
+  });
 });
 
 describe("上部タイマー表示", () => {

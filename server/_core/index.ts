@@ -50,7 +50,7 @@ async function startServer() {
       const token = await sdk.exchangeCodeForToken(code, rawState);
       const info = await sdk.getUserInfo(token.accessToken);
       await upsertUser({ openId: info.openId, name: info.name ?? null, email: info.email ?? null, loginMethod: info.loginMethod ?? info.platform ?? null, lastSignedIn: new Date() });
-      const session = await sdk.createSessionToken(info.openId, { name: info.name ?? "" });
+      const session = await sdk.createSessionToken(info.openId, { name: info.name || info.email || "StudyVerse User" });
       res.clearCookie(OAUTH_STATE_COOKIE, { ...getSessionCookieOptions(req), maxAge: -1 });
       res.cookie(COOKIE_NAME, session, { ...getSessionCookieOptions(req), maxAge: 365 * 24 * 60 * 60 * 1000 });
       return res.redirect("/");
