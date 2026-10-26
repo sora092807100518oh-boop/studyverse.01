@@ -210,6 +210,7 @@ describe("集中時間の即時表示", () => {
   it("タイマー作動中は、保存前の経過秒数をホーム合計と学習推移へ反映する", () => {
     const { rerender } = render(<HomeView {...props} running elapsed={65} />);
     expect(screen.getByText("1m 5s")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "推移を開く" }));
     expect(screen.getByTestId("live-learning-trend").textContent).toBe("65");
     rerender(<HomeView {...props} running elapsed={130} />);
     expect(screen.getByText("2m 10s")).toBeTruthy();

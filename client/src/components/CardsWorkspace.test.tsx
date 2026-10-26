@@ -39,6 +39,7 @@ afterEach(() => { cleanup(); window.localStorage.clear(); vi.clearAllMocks(); vi
 describe("保存学習セット方式の単語カード", () => {
   it("単語帳の範囲を学習セットとして保存できる", () => {
     render(<CardsWorkspace books={books} />);
+    fireEvent.click(screen.getByRole("button", { name: "学習セットを追加" }));
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: /保存する/ }));
     expect(hooks.create).toHaveBeenCalledWith(expect.objectContaining({ wordbookId: 10, rangeStart: 1, rangeEnd: 2 }));
