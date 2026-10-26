@@ -3,13 +3,10 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
-import { parse as parseCookieHeader } from "cookie";
-import { COOKIE_NAME, decodeOAuthState, OAUTH_STATE_COOKIE } from "../../shared/const";
+import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
-import { upsertUser } from "../db";
-import { getSessionCookieOptions } from "./cookies";
 import { sendSmartNotification } from "../db";
 import { sdk } from "./sdk";
 import { serveStatic, setupVite } from "./vite";
@@ -40,25 +37,7 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
   registerStorageProxy(app);
-  app.get("/api/oauth/callback", async (req, res) => {
-    try {
-      const code = typeof req.query.code === "string" ? req.query.code : "";
-      const rawState = typeof req.query.state === "string" ? req.query.state : "";
-      const { nonce } = decodeOAuthState(rawState);
-      const cookies = parseCookieHeader(req.headers.cookie ?? "");
-      if (!code || !nonce || cookies[OAUTH_STATE_COOKIE] !== nonce) return res.status(403).send("OAuth認証を確認できませんでした。最初からログインしてください。");
-      const token = await sdk.exchangeCodeForToken(code, rawState);
-      const info = await sdk.getUserInfo(token.accessToken);
-      await upsertUser({ openId: info.openId, name: info.name ?? null, email: info.email ?? null, loginMethod: info.loginMethod ?? info.platform ?? null, lastSignedIn: new Date() });
-      const session = await sdk.createSessionToken(info.openId, { name: info.name || info.email || "StudyVerse User" });
-      res.clearCookie(OAUTH_STATE_COOKIE, { ...getSessionCookieOptions(req), maxAge: -1 });
-      res.cookie(COOKIE_NAME, session, { ...getSessionCookieOptions(req), maxAge: 365 * 24 * 60 * 60 * 1000 });
-      return res.redirect("/");
-    } catch (error) {
-      console.error("[OAuth] callback failed", error);
-      return res.status(502).send("OAuthログインに失敗しました。もう一度お試しください。");
-    }
-  });
+  registerOAuthRoutes(app);
   app.post("/api/scheduled/smart-notifications", async (req, res) => {
     try {
       const user = await sdk.authenticateRequest(req);

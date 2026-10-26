@@ -63,7 +63,7 @@ describe("先生IDによる教室限定管理", () => {
     expect(cookies[0]).toMatchObject({ name: "studyverse_teacher" });
 
     const token = cookies[0]?.value;
-    const request = { protocol: "https", headers: { cookie: `studyverse_teacher=${token}` }, cookies: { studyverse_teacher: token } } as TrpcContext["req"];
+    const request = { protocol: "https", headers: { cookie: `studyverse_teacher=${token}` } } as TrpcContext["req"];
     const response = { clearCookie: () => undefined } as TrpcContext["res"];
     const teacherContext = await createContext({ req: request, res: response });
     const teacherCaller = appRouter.createCaller(teacherContext);

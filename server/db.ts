@@ -11,6 +11,7 @@ import { createTeacherAdminSessionToken, getTeacherAdminSessionTokenHash } from 
 import { previewVocabularyRows } from "./studyverse.utils";
 import { buildMissionState, calculateMonsterStage } from "./monster";
 import { storagePut } from "./storage";
+import { getActiveMembership } from "./active-membership";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -128,7 +129,8 @@ export async function revokeTeacherAdminSession(token: string) {
 export async function getProfile(userId: number) {
   const db = await getDb();
   if (!db) return undefined;
-  const rows = await db.select({ profile: studentProfiles, classroom: classrooms }).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(eq(studentProfiles.userId, userId)).limit(1);
+  const active = getActiveMembership(userId);
+  const rows = await db.select({ profile: studentProfiles, classroom: classrooms }).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(active ? and(eq(studentProfiles.userId, userId), eq(studentProfiles.id, active.profileId), eq(studentProfiles.classroomId, active.classroomId)) : eq(studentProfiles.userId, userId)).limit(1);
   return rows[0];
 }
 

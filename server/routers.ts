@@ -8,6 +8,9 @@ import { createHeartbeatJob, updateHeartbeatJob } from "./_core/heartbeat";
 import { ENV } from "./_core/env";
 import { systemRouter } from "./_core/systemRouter";
 import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { sdk } from "./_core/sdk";
+import { COOKIE_NAME, OAUTH_STATE_COOKIE } from "../shared/const";
+import { getSiteAdminSession } from "./db";
 
 function toUserMessage(error: unknown): never {
   const code = error instanceof Error ? error.message : "";
@@ -120,7 +123,11 @@ export const appRouter = router({
         return { user: { id: session.user.id, name: session.user.name, role: session.user.role }, expiresAt: session.expiresAt };
       } catch (error) { return toUserMessage(error); }
     }),
-    me: publicProcedure.query(({ ctx }) => ctx.user?.role === "admin" ? { id: ctx.user.id, name: ctx.user.name, role: ctx.user.role } : null),
+    me: publicProcedure.query(async ({ ctx }) => {
+      const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_admin");
+      const session = token ? await getSiteAdminSession(token) : null;
+      return session ? { id: session.user.id, name: session.user.name, role: session.user.role } : null;
+    }),
     wordbookCreationPolicy: protectedProcedure.query(async () => getWordbookCreationPolicy()),
     setWordbookCreationDisabled: protectedProcedure.input(z.object({ disabled: z.boolean() })).mutation(async ({ ctx, input }) => {
       try { return await setWordbookCreationDisabled(ctx.user.id, input.disabled); } catch (error) { return toUserMessage(error); }
@@ -148,7 +155,7 @@ export const appRouter = router({
       } catch (error) { return toUserMessage(error); }
     }),
     me: publicProcedure.query(async ({ ctx }) => {
-      const token = ctx.req.cookies?.studyverse_teacher as string | undefined;
+      const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_teacher");
       if (!token) return null;
       const session = await getTeacherAdminSession(token);
       return session ? { teacher: { id: session.user.id, name: session.user.name, classroomId: session.classroom.id, classroomName: session.classroom.name, classroomCode: session.classroom.code } } : null;
@@ -162,7 +169,9 @@ export const appRouter = router({
     }),
   }),
   auth: router({
-    me: publicProcedure.query(opts => opts.ctx.user),
+    me: publicProcedure.query(async ({ ctx }) => {
+      try { return await sdk.authenticateRequest(ctx.req); } catch { return null; }
+    }),
     logout: publicProcedure.mutation(async ({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       const pinToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_pin");
@@ -174,6 +183,8 @@ export const appRouter = router({
       ctx.res.clearCookie("studyverse_pin", { ...cookieOptions, maxAge: -1 });
       ctx.res.clearCookie("studyverse_admin", { ...cookieOptions, maxAge: -1 });
       ctx.res.clearCookie("studyverse_teacher", { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie(OAUTH_STATE_COOKIE, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
     }),
     pinLogin: publicProcedure.input(z.object({ pin: z.string().regex(/^\d{4}$/), classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/), personalClientId: z.string().trim().min(16).max(128).optional() })).mutation(async ({ ctx, input }) => {
@@ -185,8 +196,10 @@ export const appRouter = router({
         return { profile: result.profile, classroom: result.classroom, expiresAt: result.expiresAt };
       } catch (error) { return toUserMessage(error); }
     }),
-    oauthClassroomLogin: protectedProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/).optional() })).mutation(async ({ ctx, input }) => {
-      try { const result = await authenticateWithOAuth(ctx.user.id, input); const options = getSessionCookieOptions(ctx.req); ctx.res.cookie("studyverse_pin", result.token, { ...options, maxAge: 30 * 24 * 60 * 60 * 1000 }); return { profile: result.profile, classroom: result.classroom, expiresAt: result.expiresAt }; } catch (error) { return toUserMessage(error); }
+    oauthClassroomLogin: publicProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/).optional() })).mutation(async ({ ctx, input }) => {
+      const account = await sdk.authenticateRequest(ctx.req).catch(() => null);
+      if (!account) throw new TRPCError({ code: "UNAUTHORIZED", message: "アカウント認証を完了してからログインしてください。" });
+      try { const result = await authenticateWithOAuth(account.id, input); const options = getSessionCookieOptions(ctx.req); ctx.res.cookie("studyverse_pin", result.token, { ...options, maxAge: 30 * 24 * 60 * 60 * 1000 }); return { profile: result.profile, classroom: result.classroom, expiresAt: result.expiresAt }; } catch (error) { return toUserMessage(error); }
     }),
     pinMe: publicProcedure.query(async ({ ctx }) => {
       const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_pin");

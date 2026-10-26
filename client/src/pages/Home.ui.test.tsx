@@ -121,16 +121,15 @@ describe("OAuthログイン画面", () => {
     onTeacherEnter: vi.fn(),
   };
 
-  it("学校IDを先に入力し、GoogleとAppleを分けて選択できる", () => {
+  it("学校IDを先に入力し、専用認証画面へ進む共通ボタンに引き継ぐ", () => {
     render(<LoginGate {...gateProps} />);
     expect(screen.getByText("① school id")).toBeTruthy();
     expect(screen.getByText("学校IDを入力")).toBeTruthy();
     expect(screen.getByText("学校IDがなければ、空欄のまま個人利用として進められます。")).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText("例：STAR-2026"), { target: { value: "school-2026" } });
-    fireEvent.click(screen.getByRole("button", { name: /Google/ }));
-    expect(gateProps.onOAuthLogin).toHaveBeenCalledWith({ schoolId: "SCHOOL-2026", provider: "google" });
-    fireEvent.click(screen.getByRole("button", { name: /Apple/ }));
-    expect(gateProps.onOAuthLogin).toHaveBeenLastCalledWith({ schoolId: "SCHOOL-2026", provider: "apple" });
+    fireEvent.click(screen.getByRole("button", { name: "Google／Appleでログイン" }));
+    expect(gateProps.onOAuthLogin).toHaveBeenCalledWith({ schoolId: "SCHOOL-2026" });
+    expect(screen.getByText(/次のStudyVerse専用認証画面/)).toBeTruthy();
   });
 
   it("OAuth後は学校IDがあれば学校へ、空欄なら個人利用へ進める", async () => {

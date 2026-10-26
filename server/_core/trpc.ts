@@ -2,6 +2,7 @@ import { NOT_ADMIN_ERR_MSG, UNAUTHED_ERR_MSG } from '@shared/const';
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { TrpcContext } from "./context";
+import { withActiveMembership } from "../active-membership";
 
 const t = initTRPC.context<TrpcContext>().create({
   transformer: superjson,
@@ -17,12 +18,13 @@ const requireUser = t.middleware(async opts => {
     throw new TRPCError({ code: "UNAUTHORIZED", message: UNAUTHED_ERR_MSG });
   }
 
-  return next({
+  const user = ctx.user;
+  return withActiveMembership(ctx.activeMembership, () => next({
     ctx: {
       ...ctx,
-      user: ctx.user,
+      user,
     },
-  });
+  }));
 });
 
 export const protectedProcedure = t.procedure.use(requireUser);
