@@ -1404,6 +1404,13 @@ export async function getMarketCoinWallet(userId: number) {
   return { balance: account.marketCoins };
 }
 
+export async function listMarketCoinTransactions(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const rows = await db.select({ transaction: marketCoinTransactions, itemName: marketItems.name }).from(marketCoinTransactions).leftJoin(marketItems, eq(marketCoinTransactions.marketItemId, marketItems.id)).where(eq(marketCoinTransactions.userId, userId)).orderBy(desc(marketCoinTransactions.createdAt), desc(marketCoinTransactions.id)).limit(200);
+  return rows.map(({ transaction, itemName }) => ({ ...transaction, itemName: itemName ?? null, direction: transaction.amount >= 0 ? "earned" as const : "spent" as const, label: transaction.type === "welcome" ? "初回ログイン報酬" : transaction.type === "market_sale" ? `教材の販売：${itemName ?? "マーケット教材"}` : `教材の購入：${itemName ?? "マーケット教材"}` }));
+}
+
 async function assertSiteAdmin(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
@@ -1454,7 +1461,10 @@ export async function submitMarketItem(userId: number, input: { wordbookId: numb
 export async function listMarketModerationItems(userId: number) {
   const db = await assertSiteAdmin(userId);
   const rows = await db.select({ item: marketItems, ownerName: users.name }).from(marketItems).innerJoin(users, eq(marketItems.ownerUserId, users.id)).orderBy(desc(marketItems.createdAt));
-  return Promise.all(rows.map(async row => ({ ...(await decorateMarketItem(userId, row.item, db)), ownerName: row.ownerName })));
+  return Promise.all(rows.map(async row => {
+    const previewWords = await db.select({ id: vocabularyWords.id, front: vocabularyWords.front, back: vocabularyWords.back, reading: vocabularyWords.reading, imageUrl: vocabularyWords.imageUrl, exampleSentence: vocabularyWords.exampleSentence, exampleTranslation: vocabularyWords.exampleTranslation }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, row.item.wordbookId)).orderBy(vocabularyWords.id).limit(30);
+    return { ...(await decorateMarketItem(userId, row.item, db)), ownerName: row.ownerName, previewWords };
+  }));
 }
 
 export async function moderateMarketItem(userId: number, input: { marketItemId: number; status: "approved" | "rejected"; reviewNote?: string }) {
@@ -1463,6 +1473,20 @@ export async function moderateMarketItem(userId: number, input: { marketItemId: 
   if (!item[0]) throw new Error("MARKET_ITEM_NOT_FOUND");
   await db.update(marketItems).set({ status: input.status, reviewNote: input.reviewNote?.trim() || null, reviewedAt: new Date() }).where(eq(marketItems.id, input.marketItemId));
   await writeActivity({ actorUserId: userId, category: "classroom", action: `market.${input.status}`, details: item[0].name });
+  return { success: true } as const;
+}
+
+export async function deleteMarketItem(userId: number, marketItemId: number) {
+  const db = await assertSiteAdmin(userId);
+  const item = await db.select().from(marketItems).where(eq(marketItems.id, marketItemId)).limit(1);
+  if (!item[0]) throw new Error("MARKET_ITEM_NOT_FOUND");
+  await db.transaction(async tx => {
+    await tx.delete(marketCoinTransactions).where(eq(marketCoinTransactions.marketItemId, marketItemId));
+    await tx.delete(marketReviews).where(eq(marketReviews.marketItemId, marketItemId));
+    await tx.delete(marketDownloads).where(eq(marketDownloads.marketItemId, marketItemId));
+    await tx.delete(marketItems).where(eq(marketItems.id, marketItemId));
+  });
+  await writeActivity({ actorUserId: userId, category: "classroom", action: "market.deleted", details: item[0].name });
   return { success: true } as const;
 }
 
@@ -1514,6 +1538,43 @@ export async function saveMarketReview(userId: number, input: { marketItemId: nu
 
 
 const LOGIN_BACKGROUND_SETTING_KEY = "loginBackgroundUrl";
+const MAINTENANCE_SETTING_KEY = "studyverseMaintenance";
+
+type MaintenanceConfig = { enabled: boolean; target: "all" | "account"; targetUserId: number | null; imageUrl: string | null };
+const defaultMaintenanceConfig = (): MaintenanceConfig => ({ enabled: false, target: "all", targetUserId: null, imageUrl: null });
+
+export async function getMaintenanceConfig() {
+  const db = await getDb();
+  if (!db) return defaultMaintenanceConfig();
+  const row = await db.select({ value: siteSettings.value }).from(siteSettings).where(eq(siteSettings.key, MAINTENANCE_SETTING_KEY)).limit(1);
+  if (!row[0]) return defaultMaintenanceConfig();
+  try {
+    const parsed = JSON.parse(row[0].value) as Partial<MaintenanceConfig>;
+    return { ...defaultMaintenanceConfig(), ...parsed, target: parsed.target === "account" ? "account" : "all" };
+  } catch { return defaultMaintenanceConfig(); }
+}
+
+export async function saveMaintenanceConfig(userId: number, input: { enabled: boolean; target: "all" | "account"; targetUserId: number | null; dataUrl?: string | null }) {
+  await requireGlobalAdmin(userId);
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  let imageUrl = (await getMaintenanceConfig()).imageUrl;
+  if (input.dataUrl) {
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-zA-Z0-9+/=]+)$/.exec(input.dataUrl);
+    if (!match) throw new Error("MAINTENANCE_IMAGE_INVALID");
+    const buffer = Buffer.from(match[2], "base64");
+    if (!buffer.length || buffer.length > 5_000_000) throw new Error("MAINTENANCE_IMAGE_INVALID");
+    const contentType = match[1];
+    const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+    imageUrl = (await storagePut(`settings/maintenance-${randomUUID()}.${extension}`, buffer, contentType)).url;
+  }
+  const value = JSON.stringify({ enabled: input.enabled, target: input.target, targetUserId: input.target === "account" ? input.targetUserId : null, imageUrl });
+  const existing = await db.select({ key: siteSettings.key }).from(siteSettings).where(eq(siteSettings.key, MAINTENANCE_SETTING_KEY)).limit(1);
+  if (existing[0]) await db.update(siteSettings).set({ value }).where(eq(siteSettings.key, MAINTENANCE_SETTING_KEY));
+  else await db.insert(siteSettings).values({ key: MAINTENANCE_SETTING_KEY, value });
+  await writeActivity({ actorUserId: userId, category: "classroom", action: "site.maintenance_updated", details: `${input.enabled ? "on" : "off"}:${input.target}` });
+  return { enabled: input.enabled, target: input.target, targetUserId: input.target === "account" ? input.targetUserId : null, imageUrl } satisfies MaintenanceConfig;
+}
 
 export async function getLoginBackground() {
   const db = await getDb();
