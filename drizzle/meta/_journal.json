@@ -169,6 +169,13 @@
       "when": 1792631662585,
       "tag": "0023_soft_senator_kelly",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1793020390143,
+      "tag": "0024_abnormal_bucky",
+      "breakpoints": true
     }
   ]
 }

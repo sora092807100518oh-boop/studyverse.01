@@ -3,13 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const hooks = vi.hoisted(() => ({ invalidate: vi.fn(), submit: vi.fn(), download: vi.fn(), review: vi.fn() }));
-const marketItems = [{ id: 1, name: "旅行英語スターター", imageUrl: "/market.png", status: "approved", subject: "english", averageStars: 4.5, reviewCount: 2, downloaded: false, ownReview: null }];
+const marketItems = [{ id: 1, name: "旅行英語スターター", imageUrl: "/market.png", status: "approved", subject: "english", price: 50, averageStars: 4.5, reviewCount: 2, downloaded: false, ownReview: null, isOwner: false }];
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ market: { list: { invalidate: hooks.invalidate }, manage: { invalidate: hooks.invalidate } }, wordbooks: { list: { invalidate: hooks.invalidate } } }),
+    useUtils: () => ({ market: { list: { invalidate: hooks.invalidate }, wallet: { invalidate: hooks.invalidate }, manage: { invalidate: hooks.invalidate } }, wordbooks: { list: { invalidate: hooks.invalidate } } }),
     market: {
       list: { useQuery: () => ({ data: marketItems, isLoading: false, isError: false }) },
+      wallet: { useQuery: () => ({ data: { balance: 200 }, isLoading: false }) },
       submit: { useMutation: () => ({ mutateAsync: hooks.submit, isPending: false }) },
       download: { useMutation: () => ({ mutateAsync: hooks.download, isPending: false }) },
       review: { useMutation: () => ({ mutateAsync: hooks.review, isPending: false }) },
@@ -31,8 +32,8 @@ describe("マーケット画面", () => {
     expect(screen.getByRole("button", { name: /旅行英語スターター/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /旅行英語スターター/ }));
     expect(screen.getByRole("heading", { name: "旅行英語スターター" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "ダウンロード" })).toBeTruthy();
-    expect(screen.getByText("ダウンロード後に星レビューが可能になります。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "50コインで購入して追加" })).toBeTruthy();
+    expect(screen.getByText("追加後に星レビューが可能になります。")).toBeTruthy();
   });
 
   it("プラスから単語帳・画像・名前を選び、出品申請できる", async () => {
@@ -40,11 +41,12 @@ describe("マーケット画面", () => {
     render(<MarketPage />);
     fireEvent.click(screen.getByRole("button", { name: "マーケットにアップロード" }));
     fireEvent.change(screen.getByLabelText("マーケット表示名"), { target: { value: "自作教材" } });
+    fireEvent.change(screen.getByLabelText("マーケット価格"), { target: { value: "0" } });
     fireEvent.change(screen.getByLabelText("出品する単語帳"), { target: { value: "7" } });
     const file = new File(["image"], "cover.png", { type: "image/png" });
     fireEvent.change(screen.getByLabelText("マーケット表示用の写真"), { target: { files: [file] } });
     await waitFor(() => expect(screen.getByAltText("マーケット画像プレビュー")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "マーケットへ申請する" }));
-    await waitFor(() => expect(hooks.submit).toHaveBeenCalledWith(expect.objectContaining({ wordbookId: 7, name: "自作教材", dataUrl: expect.stringContaining("data:image/png;base64,") })));
+    await waitFor(() => expect(hooks.submit).toHaveBeenCalledWith(expect.objectContaining({ wordbookId: 7, name: "自作教材", price: 0, dataUrl: expect.stringContaining("data:image/png;base64,") })));
   });
 });

@@ -15,6 +15,7 @@ const dashboard: any = {
   mission: {
     daily: { periodKey: "2026-08-27", progress: 0, complete: false, missions: [{ key: "login", label: "ログインする", complete: false }, { key: "ai-english", label: "AIセレクト10（英語）を解く", complete: false }, { key: "ai-kanji", label: "AIセレクト10（漢字）を解く", complete: false }, { key: "test", label: "テストモードでテストを受ける", complete: false }, { key: "practice", label: "単語カードで練習をする", complete: false }] },
     monthly: { periodKey: "2026-08", progress: 0, complete: false, missions: [{ key: "login-10", label: "月に10日ログインする", value: 0, threshold: 10, complete: false }] },
+    normal: { missions: [{ key: "first-login", label: "初めてログインする", complete: true, coins: 200 }], rewards: [{ missionKey: "normal.first-login", periodKey: "lifetime", points: 0, coins: 200, label: "初めてログインする" }] },
     claimable: [],
     claimedKeys: [],
   },
@@ -22,7 +23,7 @@ const dashboard: any = {
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ monster: { dashboard: { invalidate: hooks.invalidate }, images: { invalidate: hooks.invalidate } } }),
+    useUtils: () => ({ monster: { dashboard: { invalidate: hooks.invalidate }, images: { invalidate: hooks.invalidate } }, market: { wallet: { invalidate: hooks.invalidate } } }),
     monster: {
       dashboard: { useQuery: () => ({ data: dashboard, isLoading: false, refetch: vi.fn() }) },
       startNew: { useMutation: () => ({ mutateAsync: hooks.startNew, isPending: false }) },
@@ -45,6 +46,7 @@ const resetDashboard = () => {
   dashboard.images = []; dashboard.allThreeCompleted = false; dashboard.nextCycleEggNumber = null;
   dashboard.mission.daily = { periodKey: "2026-08-27", progress: 0, complete: false, missions: [{ key: "login", label: "ログインする", complete: false }, { key: "ai-english", label: "AIセレクト10（英語）を解く", complete: false }, { key: "ai-kanji", label: "AIセレクト10（漢字）を解く", complete: false }, { key: "test", label: "テストモードでテストを受ける", complete: false }, { key: "practice", label: "単語カードで練習をする", complete: false }] };
   dashboard.mission.monthly = { periodKey: "2026-08", progress: 0, complete: false, missions: [{ key: "login-10", label: "月に10日ログインする", value: 0, threshold: 10, complete: false }] };
+  dashboard.mission.normal = { missions: [{ key: "first-login", label: "初めてログインする", complete: true, coins: 200 }], rewards: [{ missionKey: "normal.first-login", periodKey: "lifetime", points: 0, coins: 200, label: "初めてログインする" }] };
   dashboard.mission.claimable = []; dashboard.mission.claimedKeys = [];
 };
 
@@ -78,6 +80,13 @@ describe("モンスター育成UI", () => {
     await waitFor(() => expect(hooks.claim).toHaveBeenCalledWith({ missionKey: "daily.login", periodKey: "2026-08-27" }));
     fireEvent.click(screen.getByRole("button", { name: /まとめて受け取る/ }));
     await waitFor(() => expect(hooks.claimAll).toHaveBeenCalledTimes(1));
+  });
+
+  it("ノーマルタブに初回ログインの200コイン報酬を表示する", () => {
+    render(<MonsterMissionPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "ノーマル" }));
+    expect(screen.getByText("初めてログインする")).toBeTruthy();
+    expect(screen.getByText("+200 コイン")).toBeTruthy();
   });
 
   it("モンスター1・2・3ごとの卵と13段階、計42の画像登録先を表示する", () => {

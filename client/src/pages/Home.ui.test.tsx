@@ -19,10 +19,11 @@ vi.mock("@/lib/trpc", () => ({
       },
       dashboard: { useQuery: () => ({ data: { reviewWords: [], unstartedSets: [] } }) },
     },
-    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } }, classroom: { online: { list: { invalidate: hooks.invalidate } }, recommendedTests: { announcements: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate } } } }),
+    useUtils: () => ({ wordbooks: { list: { invalidate: hooks.invalidate }, managed: { invalidate: hooks.invalidate } }, auth: { pinMe: { setData: vi.fn(), invalidate: hooks.invalidate } }, classroom: { online: { list: { invalidate: hooks.invalidate } }, recommendedTests: { announcements: { invalidate: hooks.invalidate }, list: { invalidate: hooks.invalidate } } }, market: { wallet: { invalidate: hooks.invalidate } } }),
     auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前", avatarUrl: "/manus-storage/profile-test.png" } } }) } },
     profile: { updateName: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) }, uploadAvatar: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ avatarUrl: "/manus-storage/profile-test.png" }), isPending: false }) } },
     monster: { dashboard: { useQuery: () => ({ data: { eggs: [] } }) } },
+    market: { wallet: { useQuery: () => ({ data: { balance: 200 }, isLoading: false }) } },
     calendar: { dashboard: { useQuery: () => ({ data: { revivalTickets: 2 } }) } },
     smartNotifications: {
       settings: { useQuery: () => ({ data: { wordbookId: 1, direction: "question" as const, enabled: true, startTime: "08:00", endTime: "21:00" } }) },
@@ -357,6 +358,7 @@ describe("ホーム通知UI", () => {
   it("新着お知らせがある通知マークを光らせ、タップで一覧を開いて既読表示へ切り替える", () => {
     hooks.announcements = [{ id: 1, title: "学習ミッション", body: "今週の目標を確認しましょう。", publishedAt: new Date("2026-08-21T09:00:00Z") }];
     render(<Header page="ホーム" onBack={vi.fn()} onProfile={vi.fn()} />);
+    expect(screen.getByLabelText("マーケットコイン 200")).toBeTruthy();
     const notice = screen.getByRole("button", { name: "お知らせを開く" });
     expect(notice.className).toContain("shadow-[0_0_18px");
     fireEvent.click(notice);

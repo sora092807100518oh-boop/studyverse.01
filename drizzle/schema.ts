@@ -10,6 +10,7 @@ export const users = mysqlTable("users", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
+  marketCoins: int("marketCoins").default(0).notNull(),
 });
 
 export const siteSettings = mysqlTable("siteSettings", {
@@ -237,6 +238,7 @@ export const marketItems = mysqlTable("marketItems", {
   wordbookId: int("wordbookId").notNull(),
   name: varchar("name", { length: 160 }).notNull(),
   imageUrl: varchar("imageUrl", { length: 2048 }).notNull(),
+  price: int("price").default(0).notNull(),
   status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
   reviewNote: varchar("reviewNote", { length: 500 }),
   reviewedAt: timestamp("reviewedAt"),
@@ -248,6 +250,8 @@ export const marketDownloads = mysqlTable("marketDownloads", {
   id: int("id").autoincrement().primaryKey(),
   marketItemId: int("marketItemId").notNull(),
   userId: int("userId").notNull(),
+  sellerUserId: int("sellerUserId"),
+  pricePaid: int("pricePaid").default(0).notNull(),
   downloadedWordbookId: int("downloadedWordbookId").notNull(),
   downloadedAt: timestamp("downloadedAt").defaultNow().notNull(),
 }, table => [uniqueIndex("market_downloads_item_user_unique").on(table.marketItemId, table.userId)]);
@@ -260,6 +264,17 @@ export const marketReviews = mysqlTable("marketReviews", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [uniqueIndex("market_reviews_item_user_unique").on(table.marketItemId, table.userId)]);
+
+export const marketCoinTransactions = mysqlTable("marketCoinTransactions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  counterpartyUserId: int("counterpartyUserId"),
+  marketItemId: int("marketItemId"),
+  amount: int("amount").notNull(),
+  type: mysqlEnum("type", ["welcome", "market_purchase", "market_sale"]).notNull(),
+  referenceKey: varchar("referenceKey", { length: 160 }).notNull().unique(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
 
 export const revivalDays = mysqlTable("revivalDays", {
   id: int("id").autoincrement().primaryKey(),
@@ -315,6 +330,7 @@ export const monsterMissionClaims = mysqlTable("monsterMissionClaims", {
   missionKey: varchar("missionKey", { length: 96 }).notNull(),
   periodKey: varchar("periodKey", { length: 16 }).notNull(),
   points: int("points").notNull(),
+  coins: int("coins").default(0).notNull(),
   claimedAt: timestamp("claimedAt").defaultNow().notNull(),
 }, table => [uniqueIndex("monster_mission_claims_user_mission_period_unique").on(table.userId, table.missionKey, table.periodKey)]);
 

@@ -1,8 +1,8 @@
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import webpush from "web-push";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketDownloads, marketItems, marketReviews, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketCoinTransactions, marketDownloads, marketItems, marketReviews, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -137,6 +137,7 @@ export async function getProfile(userId: number) {
 const PIN_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const PIN_ATTEMPT_WINDOW_MS = 1000 * 60 * 15;
 const MAX_PIN_ATTEMPTS = 5;
+type CoinMissionReward = { missionKey: string; periodKey: string; points: number; coins?: number; label: string };
 
 function getPinPepper() { return ENV.cookieSecret; }
 
@@ -1037,34 +1038,51 @@ export async function getMonsterDashboard(userId: number) {
   const allThreeCompleted = eggNumbers.every(eggNumber => completedEggNumbers.has(eggNumber));
   const completionCounts = new Map<MonsterEggNumber, number>(eggNumbers.map(eggNumber => [eggNumber, history.filter(profile => profile.eggNumber === eggNumber && profile.progression.stage === 13).length]));
   const nextCycleEggNumber = allThreeCompleted ? [...eggNumbers].sort((left, right) => (completionCounts.get(left) ?? 0) - (completionCounts.get(right) ?? 0) || Number(left) - Number(right))[0] : null;
-  return { active: { ...active, completedAt: activeCompletedAt, progression: activeProgress }, totalFocusSeconds, claimedPoints: claimedPointsSinceStart, eggs, history, images, completedEggNumbers: Array.from(completedEggNumbers), allThreeCompleted, nextCycleEggNumber, mission: { daily: { ...mission.daily, periodKey: mission.today }, monthly: { ...mission.monthly, periodKey: mission.month }, claimable: mission.rewards.filter(reward => !claimedKeys.has(`${reward.missionKey}:${reward.periodKey}`)), claimedKeys: Array.from(claimedKeys) } };
+  return { active: { ...active, completedAt: activeCompletedAt, progression: activeProgress }, totalFocusSeconds, claimedPoints: claimedPointsSinceStart, eggs, history, images, completedEggNumbers: Array.from(completedEggNumbers), allThreeCompleted, nextCycleEggNumber, mission: { daily: { ...mission.daily, periodKey: mission.today }, monthly: { ...mission.monthly, periodKey: mission.month }, normal: mission.normal, claimable: mission.rewards.filter(reward => !claimedKeys.has(`${reward.missionKey}:${reward.periodKey}`)), claimedKeys: Array.from(claimedKeys) } };
 }
 
 export async function claimMonsterMission(userId: number, missionKey: string, periodKey: string) {
   const dashboard = await getMonsterDashboard(userId);
-  const reward = [...dashboard.mission.daily.rewards, ...dashboard.mission.monthly.rewards].find(item => item.missionKey === missionKey && item.periodKey === periodKey);
+  const reward = ([...dashboard.mission.daily.rewards, ...dashboard.mission.monthly.rewards, ...dashboard.mission.normal.rewards] as CoinMissionReward[]).find(item => item.missionKey === missionKey && item.periodKey === periodKey);
   if (!reward) throw new Error("MONSTER_MISSION_NOT_READY");
   if (dashboard.mission.claimedKeys.includes(`${missionKey}:${periodKey}`)) throw new Error("MONSTER_MISSION_ALREADY_CLAIMED");
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  await db.insert(monsterMissionClaims).values({ userId, missionKey, periodKey, points: reward.points });
+  try {
+    await db.transaction(async tx => {
+      await tx.insert(monsterMissionClaims).values({ userId, missionKey, periodKey, points: reward.points, coins: reward.coins ?? 0 });
+      if (reward.coins) {
+        await tx.update(users).set({ marketCoins: sql`${users.marketCoins} + ${reward.coins}` }).where(eq(users.id, userId));
+        await tx.insert(marketCoinTransactions).values({ userId, counterpartyUserId: null, marketItemId: null, amount: reward.coins, type: "welcome", referenceKey: `mission:${userId}:${missionKey}:${periodKey}` });
+      }
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ER_DUP_ENTRY") throw new Error("MONSTER_MISSION_ALREADY_CLAIMED");
+    throw error;
+  }
   const profile = await getProfile(userId);
   await writeActivity({ actorUserId: userId, classroomId: profile?.profile.classroomId, category: "learning", action: "monster.mission_claimed", details: reward.label });
-  return { points: reward.points, label: reward.label };
+  return { points: reward.points, coins: reward.coins ?? 0, label: reward.label };
 }
 
 export async function claimAvailableMonsterMissions(userId: number) {
   const dashboard = await getMonsterDashboard(userId);
-  const rewards = dashboard.mission.claimable;
-  if (!rewards.length) return { claims: [], totalPoints: 0 } as const;
+  const rewards = dashboard.mission.claimable as CoinMissionReward[];
+  if (!rewards.length) return { claims: [], totalPoints: 0, totalCoins: 0 } as const;
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   await db.transaction(async tx => {
-    for (const reward of rewards) await tx.insert(monsterMissionClaims).values({ userId, missionKey: reward.missionKey, periodKey: reward.periodKey, points: reward.points });
+    for (const reward of rewards) {
+      await tx.insert(monsterMissionClaims).values({ userId, missionKey: reward.missionKey, periodKey: reward.periodKey, points: reward.points, coins: reward.coins ?? 0 });
+      if (reward.coins) {
+        await tx.update(users).set({ marketCoins: sql`${users.marketCoins} + ${reward.coins}` }).where(eq(users.id, userId));
+        await tx.insert(marketCoinTransactions).values({ userId, counterpartyUserId: null, marketItemId: null, amount: reward.coins, type: "welcome", referenceKey: `mission:${userId}:${reward.missionKey}:${reward.periodKey}` });
+      }
+    }
   });
   const profile = await getProfile(userId);
   await writeActivity({ actorUserId: userId, classroomId: profile?.profile.classroomId, category: "learning", action: "monster.missions_claimed", details: `${rewards.length}件` });
-  return { claims: rewards, totalPoints: rewards.reduce((sum, reward) => sum + reward.points, 0) };
+  return { claims: rewards, totalPoints: rewards.reduce((sum, reward) => sum + reward.points, 0), totalCoins: rewards.reduce((sum, reward) => sum + (reward.coins ?? 0), 0) };
 }
 
 export async function recordAiSelectCompletion(userId: number, subject: "english" | "kanji") {
@@ -1378,6 +1396,14 @@ export async function sendSmartNotificationNow(userId: number) {
 }
 
 
+export async function getMarketCoinWallet(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = (await db.select({ marketCoins: users.marketCoins }).from(users).where(eq(users.id, userId)).limit(1))[0];
+  if (!account) throw new Error("PROFILE_NOT_FOUND");
+  return { balance: account.marketCoins };
+}
+
 async function assertSiteAdmin(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
@@ -1394,7 +1420,7 @@ async function decorateMarketItem(userId: number, item: typeof marketItems.$infe
   ]);
   const averageStars = reviews.length ? Math.round((reviews.reduce((sum, review) => sum + review.stars, 0) / reviews.length) * 10) / 10 : 0;
   const ownReview = reviews.find(review => review.userId === userId)?.stars ?? null;
-  return { ...item, sourceTitle: source[0]?.title ?? item.name, subject: source[0]?.subject ?? "english", reviewCount: reviews.length, averageStars, downloaded: Boolean(download[0]), ownReview };
+  return { ...item, sourceTitle: source[0]?.title ?? item.name, subject: source[0]?.subject ?? "english", reviewCount: reviews.length, averageStars, downloaded: Boolean(download[0]), ownReview, isOwner: item.ownerUserId === userId };
 }
 
 export async function listMarketItems(userId: number) {
@@ -1404,13 +1430,15 @@ export async function listMarketItems(userId: number) {
   return Promise.all(rows.map(item => decorateMarketItem(userId, item, db)));
 }
 
-export async function submitMarketItem(userId: number, input: { wordbookId: number; name: string; dataUrl: string }) {
+export async function submitMarketItem(userId: number, input: { wordbookId: number; name: string; price: number; dataUrl: string }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const source = await db.select().from(wordbooks).where(and(eq(wordbooks.id, input.wordbookId), eq(wordbooks.ownerUserId, userId), eq(wordbooks.visibility, "private"))).limit(1);
   if (!source[0]) throw new Error("MARKET_WORDBOOK_FORBIDDEN");
   const words = await db.select({ id: vocabularyWords.id }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, input.wordbookId)).limit(1);
   if (!words[0]) throw new Error("MARKET_WORDBOOK_EMPTY");
+  const copied = await db.select({ id: marketDownloads.id }).from(marketDownloads).where(eq(marketDownloads.downloadedWordbookId, input.wordbookId)).limit(1);
+  if (copied[0]) throw new Error("MARKET_WORDBOOK_FORBIDDEN");
   const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-zA-Z0-9+/=]+)$/.exec(input.dataUrl);
   if (!match) throw new Error("MARKET_IMAGE_INVALID");
   const contentType = match[1];
@@ -1418,7 +1446,7 @@ export async function submitMarketItem(userId: number, input: { wordbookId: numb
   if (!buffer.length || buffer.length > 5_000_000) throw new Error("MARKET_IMAGE_INVALID");
   const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
   const uploaded = await storagePut(`market/${userId}/${randomUUID()}.${extension}`, buffer, contentType);
-  const inserted = await db.insert(marketItems).values({ ownerUserId: userId, wordbookId: input.wordbookId, name: input.name.trim(), imageUrl: uploaded.url, status: "pending" }).$returningId();
+  const inserted = await db.insert(marketItems).values({ ownerUserId: userId, wordbookId: input.wordbookId, name: input.name.trim(), imageUrl: uploaded.url, price: input.price, status: "pending" }).$returningId();
   await writeActivity({ actorUserId: userId, category: "classroom", action: "market.submitted", details: input.name.trim() });
   return { id: inserted[0]?.id, status: "pending" as const };
 }
@@ -1441,19 +1469,38 @@ export async function moderateMarketItem(userId: number, input: { marketItemId: 
 export async function downloadMarketItem(userId: number, marketItemId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const item = (await db.select().from(marketItems).where(and(eq(marketItems.id, marketItemId), eq(marketItems.status, "approved"))).limit(1))[0];
-  if (!item) throw new Error("MARKET_ITEM_NOT_FOUND");
   const existing = (await db.select().from(marketDownloads).where(and(eq(marketDownloads.marketItemId, marketItemId), eq(marketDownloads.userId, userId))).limit(1))[0];
-  if (existing) return { downloadedWordbookId: existing.downloadedWordbookId, alreadyDownloaded: true };
-  const source = (await db.select().from(wordbooks).where(eq(wordbooks.id, item.wordbookId)).limit(1))[0];
-  if (!source) throw new Error("MARKET_ITEM_NOT_FOUND");
+  if (existing) return { downloadedWordbookId: existing.downloadedWordbookId, alreadyDownloaded: true, pricePaid: existing.pricePaid, balance: (await getMarketCoinWallet(userId)).balance };
   const profile = await getProfile(userId);
-  const cloned = await db.insert(wordbooks).values({ title: item.name, subject: source.subject, visibility: "private", ownerUserId: userId, classroomId: profile?.profile.classroomId ?? null }).$returningId();
-  const words = await db.select({ front: vocabularyWords.front, back: vocabularyWords.back, reading: vocabularyWords.reading, imageUrl: vocabularyWords.imageUrl, exampleSentence: vocabularyWords.exampleSentence, exampleTranslation: vocabularyWords.exampleTranslation }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, source.id)).orderBy(vocabularyWords.id);
-  if (words.length) await db.insert(vocabularyWords).values(words.map(word => ({ ...word, wordbookId: cloned[0].id, source: "admin" as const })));
-  await db.insert(marketDownloads).values({ marketItemId, userId, downloadedWordbookId: cloned[0].id });
-  await writeActivity({ actorUserId: userId, classroomId: profile?.profile.classroomId, category: "classroom", action: "market.downloaded", details: item.name });
-  return { downloadedWordbookId: cloned[0].id, alreadyDownloaded: false };
+  const result = await db.transaction(async tx => {
+    const alreadyDownloaded = (await tx.select().from(marketDownloads).where(and(eq(marketDownloads.marketItemId, marketItemId), eq(marketDownloads.userId, userId))).limit(1))[0];
+    if (alreadyDownloaded) return { downloadedWordbookId: alreadyDownloaded.downloadedWordbookId, alreadyDownloaded: true, pricePaid: alreadyDownloaded.pricePaid };
+    const item = (await tx.select().from(marketItems).where(and(eq(marketItems.id, marketItemId), eq(marketItems.status, "approved"))).limit(1))[0];
+    if (!item) throw new Error("MARKET_ITEM_NOT_FOUND");
+    if (item.ownerUserId === userId) throw new Error("MARKET_SELF_PURCHASE_FORBIDDEN");
+    const source = (await tx.select().from(wordbooks).where(and(eq(wordbooks.id, item.wordbookId), eq(wordbooks.ownerUserId, item.ownerUserId), eq(wordbooks.visibility, "private"))).limit(1))[0];
+    if (!source) throw new Error("MARKET_SOURCE_UNAVAILABLE");
+    if (item.price > 0) {
+      const debit = await tx.update(users).set({ marketCoins: sql`${users.marketCoins} - ${item.price}` }).where(and(eq(users.id, userId), gte(users.marketCoins, item.price)));
+      const affectedRows = Array.isArray(debit) ? Number((debit[0] as { affectedRows?: number } | undefined)?.affectedRows ?? 0) : 0;
+      if (affectedRows !== 1) throw new Error("MARKET_INSUFFICIENT_COINS");
+      await tx.update(users).set({ marketCoins: sql`${users.marketCoins} + ${item.price}` }).where(eq(users.id, item.ownerUserId));
+      await tx.insert(marketCoinTransactions).values([
+        { userId, counterpartyUserId: item.ownerUserId, marketItemId: item.id, amount: -item.price, type: "market_purchase", referenceKey: `market:${item.id}:${userId}:purchase` },
+        { userId: item.ownerUserId, counterpartyUserId: userId, marketItemId: item.id, amount: item.price, type: "market_sale", referenceKey: `market:${item.id}:${userId}:sale` },
+      ]);
+    }
+    const cloned = await tx.insert(wordbooks).values({ title: item.name, subject: source.subject, visibility: "private", ownerUserId: userId, classroomId: profile?.profile.classroomId ?? null }).$returningId();
+    const clonedWordbookId = cloned[0]?.id;
+    if (!clonedWordbookId) throw new Error("MARKET_ITEM_NOT_FOUND");
+    const words = await tx.select({ front: vocabularyWords.front, back: vocabularyWords.back, reading: vocabularyWords.reading, imageUrl: vocabularyWords.imageUrl, exampleSentence: vocabularyWords.exampleSentence, exampleTranslation: vocabularyWords.exampleTranslation }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, source.id)).orderBy(vocabularyWords.id);
+    if (words.length) await tx.insert(vocabularyWords).values(words.map(word => ({ ...word, wordbookId: clonedWordbookId, source: "admin" as const })));
+    await tx.insert(marketDownloads).values({ marketItemId, userId, sellerUserId: item.ownerUserId, pricePaid: item.price, downloadedWordbookId: clonedWordbookId });
+    return { downloadedWordbookId: clonedWordbookId, alreadyDownloaded: false, pricePaid: item.price, itemName: item.name };
+  });
+  const balance = (await getMarketCoinWallet(userId)).balance;
+  if (!result.alreadyDownloaded && "itemName" in result) await writeActivity({ actorUserId: userId, classroomId: profile?.profile.classroomId, category: "classroom", action: "market.downloaded", details: result.itemName });
+  return { ...result, balance };
 }
 
 export async function saveMarketReview(userId: number, input: { marketItemId: number; stars: number }) {

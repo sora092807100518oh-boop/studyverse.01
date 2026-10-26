@@ -38,6 +38,17 @@ describe("モンスターミッションの進捗", () => {
     expect(state.daily.rewards.some(reward => reward.missionKey === "daily.bonus" && reward.points === 5)).toBe(true);
   });
 
+  it("初めてログインするノーマルミッションは一度だけ200マーケットコインを報酬にする", () => {
+    const state = buildMissionState({
+      startedAt: new Date("2026-08-21T00:01:00+09:00"),
+      activities: [{ action: "login.success", details: "oauth", createdAt: today }],
+      records: [],
+      now: today,
+    });
+    expect(state.normal.missions).toEqual([{ key: "first-login", label: "初めてログインする", complete: true, coins: 200 }]);
+    expect(state.normal.rewards).toEqual([{ missionKey: "normal.first-login", periodKey: "lifetime", points: 0, coins: 200, label: "初めてログインする" }]);
+  });
+
   it("マンスリーではログイン日数、解答数、AIセレクト完了数を個別に集計する", () => {
     const activities = Array.from({ length: 10 }, (_, index) => ({ action: "login.success", details: "pin", createdAt: new Date(`2026-08-${String(index + 1).padStart(2, "0")}T12:00:00+09:00`) })).concat(Array.from({ length: 3 }, () => ({ action: "ai_select.completed", details: "english", createdAt: today })));
     const records = Array.from({ length: 50 }, () => ({ mode: "practice" as const, answeredAt: today }));

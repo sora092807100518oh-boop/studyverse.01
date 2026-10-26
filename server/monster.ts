@@ -1,6 +1,6 @@
 export type MonsterStudyRecord = { mode: "practice" | "test" | "journal" | "ai_select"; answeredAt: Date };
 export type MonsterActivity = { action: string; details: string | null; createdAt: Date };
-export type MissionReward = { missionKey: string; periodKey: string; points: number; label: string };
+export type MissionReward = { missionKey: string; periodKey: string; points: number; coins?: number; label: string };
 
 const TOKYO = "Asia/Tokyo";
 export const DAILY_MISSIONS = [
@@ -87,5 +87,8 @@ export function buildMissionState(input: { startedAt: Date; records: MonsterStud
     ...monthly.filter(mission => mission.complete).map(mission => ({ missionKey: `monthly.${mission.key}`, periodKey: month, points: 1, label: mission.label })),
     ...(monthly.every(mission => mission.complete) ? [{ missionKey: "monthly.bonus", periodKey: month, points: 30, label: "マンスリー全達成ボーナス" }] : []),
   ];
-  return { today, month, daily: { missions: DAILY_MISSIONS.map(mission => ({ ...mission, complete: todayRow.flags[mission.key] })), complete: todayRow.complete, progress: DAILY_MISSIONS.filter(mission => todayRow.flags[mission.key]).length, rewards: dailyRewards }, monthly: { missions: monthly, metrics, complete: monthly.every(mission => mission.complete), progress: monthly.filter(mission => mission.complete).length, rewards: monthlyRewards }, rewards: [...dailyRewards, ...monthlyRewards] };
+  const firstLoginComplete = input.activities.some(activity => activity.action === "login.success");
+  const normalMissions = [{ key: "first-login", label: "初めてログインする", complete: firstLoginComplete, coins: 200 }] as const;
+  const normalRewards: MissionReward[] = firstLoginComplete ? [{ missionKey: "normal.first-login", periodKey: "lifetime", points: 0, coins: 200, label: "初めてログインする" }] : [];
+  return { today, month, daily: { missions: DAILY_MISSIONS.map(mission => ({ ...mission, complete: todayRow.flags[mission.key] })), complete: todayRow.complete, progress: DAILY_MISSIONS.filter(mission => todayRow.flags[mission.key]).length, rewards: dailyRewards }, monthly: { missions: monthly, metrics, complete: monthly.every(mission => mission.complete), progress: monthly.filter(mission => mission.complete).length, rewards: monthlyRewards }, normal: { missions: normalMissions, rewards: normalRewards }, rewards: [...dailyRewards, ...monthlyRewards, ...normalRewards] };
 }
