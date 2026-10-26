@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -69,7 +69,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { BookDetail, CardsView, Header, HomeView, LoginGate, ProfileControls, TimerCard, TimerStrip, isLearnerOnlyBook } from "./Home";
+import { BookDetail, CardsView, DEFAULT_HOME_LAYOUT, Header, HOME_LAYOUT_STORAGE_KEY, HomeView, LoginGate, moveHomeLayoutItem, normalizeHomeLayout, ProfileControls, TimerCard, TimerStrip, isLearnerOnlyBook } from "./Home";
 
 const books = {
   英単語: [{
@@ -144,6 +144,13 @@ describe("OAuthログイン画面", () => {
     fireEvent.click(screen.getByRole("button", { name: "個人利用でログイン" }));
     await waitFor(() => expect(onPersonalEnter).toHaveBeenCalledTimes(1));
   });
+
+  it("必要な入力とログイン操作を一つのフォーム内に表示する", () => {
+    render(<LoginGate {...gateProps} />);
+    expect(screen.getByTestId("login-form")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Google／Appleでログイン" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "学校IDを読み取る" })).toBeTruthy();
+  });
 });
 
 describe("上部タイマー表示", () => {
@@ -208,7 +215,8 @@ describe("集中時間の即時表示", () => {
   it("あいさつ・誘導文を表示せず、学習状況とメニューの後にタイマーを置く", () => {
     const { container } = render(<HomeView {...props} displayName="テスト" running={false} elapsed={0}/>);
     expect(screen.queryByText(/こんにちは|えらぼう|選ぼう|小さな一歩/)).toBeNull();
-    expect(Array.from(container.querySelector(".home-board")!.children).slice(0, 3).map(node => node.className)).toEqual(["home-metrics", "home-feature-grid", "home-timer-dock"]);
+    expect(container.querySelector(".home-reorder-grid")).toBeTruthy();
+    expect(Array.from(container.querySelectorAll("[data-home-item]")).map(node => node.getAttribute("data-home-item"))).toEqual(["focus", "accuracy", "streak", "ai", "review", "calendar", "trend", "growth", "mission", "timer", "online"]);
     expect(screen.getByRole("button", { name: "予定を開く" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "育成を開く" })).toBeTruthy();
   });
@@ -259,6 +267,40 @@ describe("集中時間の即時表示", () => {
     render(<HomeView {...props} setPage={setPage} running={false} elapsed={0} />);
     fireEvent.click(screen.getByRole("button", { name: /オンライン状況/ }));
     expect(setPage).toHaveBeenCalledWith("online");
+  });
+});
+
+describe("ホームの並び替え", () => {
+  const props = { setPage: vi.fn(), onOpenReview: vi.fn(), onPreloadAiSelect: vi.fn(), timerDurationMinutes: 25, showTopTimer: true, onToggleTimer: vi.fn(), onResetTimer: vi.fn(), onDurationChange: vi.fn(), onShowTopTimerChange: vi.fn(), summary: { totalFocusSeconds: 0, retention: 0, streak: 0, records: 0 } };
+  afterEach(() => { vi.useRealTimers(); window.localStorage.removeItem(HOME_LAYOUT_STORAGE_KEY); });
+  it("壊れた保存データを無視し、既存順を保ちながら新しい項目を補う", () => {
+    expect(normalizeHomeLayout(["timer", "ai", "timer", "unknown"])).toEqual(["timer", "ai", ...DEFAULT_HOME_LAYOUT.filter(id => id !== "timer" && id !== "ai")]);
+    expect(normalizeHomeLayout("invalid")).toEqual(DEFAULT_HOME_LAYOUT);
+    expect(normalizeHomeLayout(["online", "timer"], true)).toEqual(["timer", ...DEFAULT_HOME_LAYOUT.filter(id => id !== "timer" && id !== "online")]);
+  });
+  it("タイルを入れ替える純粋処理は移動元と移動先を入れ替える", () => {
+    expect(moveHomeLayoutItem(["ai", "timer", "focus"], "timer", "ai")).toEqual(["timer", "ai", "focus"]);
+    expect(moveHomeLayoutItem(["ai", "timer"], "missing" as never, "ai")).toEqual(["ai", "timer"]);
+  });
+  it("長押しで編集状態へ入り、完了と元に戻すを操作できる", () => {
+    vi.useFakeTimers();
+    const { container } = render(<HomeView {...props} running={false} elapsed={0}/>);
+    const ai = container.querySelector<HTMLElement>('[data-home-item="ai"]')!;
+    fireEvent.pointerDown(ai, { pointerId: 7, pointerType: "touch", clientX: 32, clientY: 220 });
+    act(() => { vi.advanceTimersByTime(430); });
+    expect(screen.getByRole("status").textContent).toContain("並び替え中");
+    expect(container.querySelector(".home-reorder-grid")?.classList.contains("is-editing")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "元に戻す" }));
+    expect(Array.from(container.querySelectorAll("[data-home-item]")).map(node => node.getAttribute("data-home-item"))).toEqual(DEFAULT_HOME_LAYOUT);
+    fireEvent.click(screen.getByRole("button", { name: "完了" }));
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+  it("保存済みの並び順を復元し、個人利用ではオンライン項目を除く", () => {
+    window.localStorage.setItem(HOME_LAYOUT_STORAGE_KEY, JSON.stringify(["timer", "ai", "focus"]));
+    const { container, rerender } = render(<HomeView {...props} running={false} elapsed={0}/>);
+    expect(Array.from(container.querySelectorAll("[data-home-item]")).slice(0, 3).map(node => node.getAttribute("data-home-item"))).toEqual(["timer", "ai", "focus"]);
+    rerender(<HomeView {...props} isPersonalUse running={false} elapsed={0}/>);
+    expect(container.querySelector('[data-home-item="online"]')).toBeNull();
   });
 });
 
