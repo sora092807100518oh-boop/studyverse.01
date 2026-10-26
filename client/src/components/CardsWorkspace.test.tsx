@@ -38,11 +38,17 @@ afterEach(() => { cleanup(); window.localStorage.clear(); vi.clearAllMocks(); vi
 
 describe("保存学習セット方式の単語カード", () => {
   it("単語帳の範囲を学習セットとして保存できる", () => {
-    render(<CardsWorkspace books={books} />);
-    fireEvent.click(screen.getByRole("button", { name: "学習セットを追加" }));
+    const scrollSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const { container } = render(<CardsWorkspace books={books} />);
+    const add = screen.getByRole("button", { name: "学習セットを追加" });
+    expect(add.parentElement).toBe(document.body);
+    expect(container.contains(add)).toBe(false);
+    fireEvent.click(add);
+    expect(scrollSpy).toHaveBeenCalledWith({ top: 0, behavior: "auto" });
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "10" } });
     fireEvent.click(screen.getByRole("button", { name: /保存する/ }));
     expect(hooks.create).toHaveBeenCalledWith(expect.objectContaining({ wordbookId: 10, rangeStart: 1, rangeEnd: 2 }));
+    scrollSpy.mockRestore();
   });
   it("保存済みセットをタップすると練習を開始できる", () => {
     render(<CardsWorkspace books={books} />);

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -161,11 +161,9 @@ describe("上部タイマー表示", () => {
   it("任意の集中時間と上部表示設定を変更できる", () => {
     const onDurationChange = vi.fn(); const onShowTopTimerChange = vi.fn();
     render(<TimerCard running={false} elapsed={0} durationMinutes={25} showTopTimer onToggle={vi.fn()} onReset={vi.fn()} onDurationChange={onDurationChange} onShowTopTimerChange={onShowTopTimerChange} />);
-    expect(screen.queryByLabelText("集中時間（分）")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "タイマー時間：25分" }));
+    expect(screen.getByLabelText("集中時間（分）")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("集中時間（分）"), { target: { value: "50" } });
     expect(onDurationChange).toHaveBeenCalledWith(50);
-    expect(screen.queryByLabelText("集中時間（分）")).toBeNull();
     fireEvent.click(screen.getByRole("checkbox"));
     expect(onShowTopTimerChange).toHaveBeenCalledWith(false);
   });
@@ -207,6 +205,46 @@ describe("学習プロフィール", () => {
 
 describe("集中時間の即時表示", () => {
   const props = { setPage: vi.fn(), onOpenReview: vi.fn(), onPreloadAiSelect: vi.fn(), timerDurationMinutes: 25, showTopTimer: true, onToggleTimer: vi.fn(), onResetTimer: vi.fn(), onDurationChange: vi.fn(), onShowTopTimerChange: vi.fn(), summary: { totalFocusSeconds: 0, retention: 0, streak: 0, records: 0 } };
+  it("あいさつ・誘導文を表示せず、学習状況とメニューの後にタイマーを置く", () => {
+    const { container } = render(<HomeView {...props} displayName="テスト" running={false} elapsed={0}/>);
+    expect(screen.queryByText(/こんにちは|えらぼう|選ぼう|小さな一歩/)).toBeNull();
+    expect(Array.from(container.querySelector(".home-board")!.children).slice(0, 3).map(node => node.className)).toEqual(["home-metrics", "home-feature-grid", "home-timer-dock"]);
+    expect(screen.getByRole("button", { name: "予定を開く" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "育成を開く" })).toBeTruthy();
+  });
+  it("ホーム上で時間を直接選択し、別画面を開かず自由な時間も設定できる", () => {
+    const onDurationChange = vi.fn();
+    render(<HomeView {...props} onDurationChange={onDurationChange} running={false} elapsed={0}/>);
+    fireEvent.change(screen.getByLabelText("集中時間（分）"), { target: { value: "50" } });
+    expect(onDurationChange).toHaveBeenCalledWith(50);
+    fireEvent.change(screen.getByLabelText("集中時間（分）"), { target: { value: "custom" } });
+    fireEvent.change(screen.getByLabelText("カスタム時間（分）"), { target: { value: "37" } });
+    fireEvent.click(screen.getByRole("button", { name: "設定" }));
+    expect(onDurationChange).toHaveBeenCalledWith(37);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  it("タイマー設定をページの外側へ表示し、開始・リセット・表示切替を操作できる", () => {
+    const onDurationChange = vi.fn(); const onResetTimer = vi.fn(); const onShowTopTimerChange = vi.fn();
+    const { container } = render(<HomeView {...props} onDurationChange={onDurationChange} onResetTimer={onResetTimer} onShowTopTimerChange={onShowTopTimerChange} running={false} elapsed={0}/>);
+    fireEvent.click(screen.getByRole("button", { name: "タイマーを設定" }));
+    const dialog = screen.getByRole("dialog", { name: "タイマー設定" });
+    expect(dialog.parentElement).toBe(document.body);
+    expect(container.contains(dialog)).toBe(false);
+    fireEvent.change(within(dialog).getByLabelText("集中時間（分）"), { target: { value: "15" } });
+    expect(onDurationChange).toHaveBeenCalledWith(15);
+    fireEvent.click(within(dialog).getByRole("button", { name: "リセット" }));
+    expect(onResetTimer).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(dialog).getByRole("checkbox"));
+    expect(onShowTopTimerChange).toHaveBeenCalledWith(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "閉じる" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  it("作動中の時間変更を無効にし、個人利用のオンライン導線を表示しない", () => {
+    render(<HomeView {...props} isPersonalUse running elapsed={65}/>);
+    expect((screen.getByLabelText("集中時間（分）") as HTMLSelectElement).disabled).toBe(true);
+    expect(screen.getByLabelText("ホームの残り時間").textContent).toBe("23:55");
+    expect(screen.queryByRole("button", { name: "オンライン状況を開く" })).toBeNull();
+  });
   it("タイマー作動中は、保存前の経過秒数をホーム合計と学習推移へ反映する", () => {
     const { rerender } = render(<HomeView {...props} running elapsed={65} />);
     expect(screen.getByText("1m 5s")).toBeTruthy();
