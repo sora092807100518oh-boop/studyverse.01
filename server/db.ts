@@ -2,7 +2,7 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import webpush from "web-push";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketCoinTransactions, marketDownloads, marketItems, marketReviews, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketCoinTransactions, marketCoinTransfers, marketDownloads, marketItems, marketReviews, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -1407,8 +1407,81 @@ export async function getMarketCoinWallet(userId: number) {
 export async function listMarketCoinTransactions(userId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const rows = await db.select({ transaction: marketCoinTransactions, itemName: marketItems.name }).from(marketCoinTransactions).leftJoin(marketItems, eq(marketCoinTransactions.marketItemId, marketItems.id)).where(eq(marketCoinTransactions.userId, userId)).orderBy(desc(marketCoinTransactions.createdAt), desc(marketCoinTransactions.id)).limit(200);
-  return rows.map(({ transaction, itemName }) => ({ ...transaction, itemName: itemName ?? null, direction: transaction.amount >= 0 ? "earned" as const : "spent" as const, label: transaction.type === "welcome" ? "初回ログイン報酬" : transaction.type === "market_sale" ? `教材の販売：${itemName ?? "マーケット教材"}` : `教材の購入：${itemName ?? "マーケット教材"}` }));
+  const rows = await db.select({ transaction: marketCoinTransactions, itemName: marketItems.name, counterpartyName: users.name }).from(marketCoinTransactions).leftJoin(marketItems, eq(marketCoinTransactions.marketItemId, marketItems.id)).leftJoin(users, eq(marketCoinTransactions.counterpartyUserId, users.id)).where(eq(marketCoinTransactions.userId, userId)).orderBy(desc(marketCoinTransactions.createdAt), desc(marketCoinTransactions.id)).limit(200);
+  return rows.map(({ transaction, itemName, counterpartyName }) => ({ ...transaction, itemName: itemName ?? null, counterpartyName: counterpartyName ?? null, direction: transaction.amount >= 0 ? "earned" as const : "spent" as const, label: transaction.type === "welcome" ? "初回ログイン報酬" : transaction.type === "market_sale" ? `教材の販売：${itemName ?? "マーケット教材"}` : transaction.type === "market_purchase" ? `教材の購入：${itemName ?? "マーケット教材"}` : transaction.type === "coin_transfer_send" ? `${counterpartyName ?? "相手"}へ送金` : `${counterpartyName ?? "相手"}から受取` }));
+}
+
+const COIN_TRANSFER_TTL_MS = 1000 * 60 * 10;
+
+function coinTransferToken() { return randomUUID().replace(/-/g, ""); }
+
+async function readCoinTransfer(db: any, token: string) {
+  return (await db.select({ transfer: marketCoinTransfers, senderName: users.name }).from(marketCoinTransfers).innerJoin(users, eq(marketCoinTransfers.senderUserId, users.id)).where(eq(marketCoinTransfers.token, token)).limit(1))[0];
+}
+
+function normalizeCoinTransfer(record: Awaited<ReturnType<typeof readCoinTransfer>>) {
+  if (!record) throw new Error("COIN_TRANSFER_NOT_FOUND");
+  return { ...record.transfer, senderName: record.senderName ?? "StudyVerse利用者", isExpired: record.transfer.expiresAt.getTime() <= Date.now() };
+}
+
+export async function createCoinTransferRequest(userId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const token = coinTransferToken();
+  const expiresAt = new Date(Date.now() + COIN_TRANSFER_TTL_MS);
+  await db.insert(marketCoinTransfers).values({ token, senderUserId: userId, expiresAt, status: "pending" });
+  return { token, expiresAt };
+}
+
+export async function getCoinTransferRequest(userId: number, token: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const transfer = normalizeCoinTransfer(await readCoinTransfer(db, token));
+  if (transfer.status === "pending" && transfer.isExpired) {
+    await db.update(marketCoinTransfers).set({ status: "expired" }).where(eq(marketCoinTransfers.id, transfer.id));
+    return { ...transfer, status: "expired" as const };
+  }
+  if (transfer.senderUserId !== userId && transfer.recipientUserId !== null && transfer.recipientUserId !== userId) throw new Error("COIN_TRANSFER_FORBIDDEN");
+  const recipient = transfer.recipientUserId ? await db.select({ name: users.name }).from(users).where(eq(users.id, transfer.recipientUserId)).limit(1) : [];
+  return { ...transfer, recipientName: recipient[0]?.name ?? null };
+}
+
+export async function confirmCoinTransferRecipient(userId: number, token: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const transfer = normalizeCoinTransfer(await readCoinTransfer(db, token));
+  if (transfer.isExpired || transfer.status === "expired") { await db.update(marketCoinTransfers).set({ status: "expired" }).where(eq(marketCoinTransfers.id, transfer.id)); throw new Error("COIN_TRANSFER_EXPIRED"); }
+  if (transfer.senderUserId === userId) throw new Error("COIN_TRANSFER_SELF_FORBIDDEN");
+  if (transfer.status !== "pending" && transfer.recipientUserId !== userId) throw new Error("COIN_TRANSFER_ALREADY_CLAIMED");
+  if (transfer.status === "completed") throw new Error("COIN_TRANSFER_COMPLETED");
+  if (transfer.status === "pending") await db.update(marketCoinTransfers).set({ recipientUserId: userId, status: "recipient_confirmed" }).where(and(eq(marketCoinTransfers.id, transfer.id), eq(marketCoinTransfers.status, "pending")));
+  const confirmed = normalizeCoinTransfer(await readCoinTransfer(db, token));
+  if (confirmed.recipientUserId !== userId) throw new Error("COIN_TRANSFER_ALREADY_CLAIMED");
+  return { ...confirmed, recipientName: (await db.select({ name: users.name }).from(users).where(eq(users.id, userId)).limit(1))[0]?.name ?? null };
+}
+
+export async function completeCoinTransfer(userId: number, input: { token: string; amount: number }) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const result = await db.transaction(async tx => {
+    const record = normalizeCoinTransfer(await readCoinTransfer(tx, input.token));
+    if (record.senderUserId !== userId) throw new Error("COIN_TRANSFER_FORBIDDEN");
+    if (record.isExpired || record.status === "expired") { await tx.update(marketCoinTransfers).set({ status: "expired" }).where(eq(marketCoinTransfers.id, record.id)); throw new Error("COIN_TRANSFER_EXPIRED"); }
+    if (record.status === "completed") throw new Error("COIN_TRANSFER_COMPLETED");
+    if (record.status !== "recipient_confirmed" || !record.recipientUserId) throw new Error("COIN_TRANSFER_RECIPIENT_REQUIRED");
+    const debit = await tx.update(users).set({ marketCoins: sql`${users.marketCoins} - ${input.amount}` }).where(and(eq(users.id, userId), gte(users.marketCoins, input.amount)));
+    const affectedRows = Array.isArray(debit) ? Number((debit[0] as { affectedRows?: number } | undefined)?.affectedRows ?? 0) : 0;
+    if (affectedRows !== 1) throw new Error("MARKET_INSUFFICIENT_COINS");
+    await tx.update(users).set({ marketCoins: sql`${users.marketCoins} + ${input.amount}` }).where(eq(users.id, record.recipientUserId));
+    await tx.insert(marketCoinTransactions).values([
+      { userId, counterpartyUserId: record.recipientUserId, marketItemId: null, amount: -input.amount, type: "coin_transfer_send", referenceKey: `coin-transfer:${record.id}:send` },
+      { userId: record.recipientUserId, counterpartyUserId: userId, marketItemId: null, amount: input.amount, type: "coin_transfer_receive", referenceKey: `coin-transfer:${record.id}:receive` },
+    ]);
+    await tx.update(marketCoinTransfers).set({ status: "completed", completedAt: new Date() }).where(and(eq(marketCoinTransfers.id, record.id), eq(marketCoinTransfers.status, "recipient_confirmed")));
+    return { recipientUserId: record.recipientUserId };
+  });
+  const [sender, recipient] = await Promise.all([getMarketCoinWallet(userId), getMarketCoinWallet(result.recipientUserId)]);
+  return { ...result, senderBalance: sender.balance, recipientBalance: recipient.balance };
 }
 
 async function assertSiteAdmin(userId: number) {

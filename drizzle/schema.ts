@@ -271,8 +271,19 @@ export const marketCoinTransactions = mysqlTable("marketCoinTransactions", {
   counterpartyUserId: int("counterpartyUserId"),
   marketItemId: int("marketItemId"),
   amount: int("amount").notNull(),
-  type: mysqlEnum("type", ["welcome", "market_purchase", "market_sale"]).notNull(),
+  type: mysqlEnum("type", ["welcome", "market_purchase", "market_sale", "coin_transfer_send", "coin_transfer_receive"]).notNull(),
   referenceKey: varchar("referenceKey", { length: 160 }).notNull().unique(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const marketCoinTransfers = mysqlTable("marketCoinTransfers", {
+  id: int("id").autoincrement().primaryKey(),
+  token: varchar("token", { length: 80 }).notNull().unique(),
+  senderUserId: int("senderUserId").notNull(),
+  recipientUserId: int("recipientUserId"),
+  status: mysqlEnum("status", ["pending", "recipient_confirmed", "completed", "cancelled", "expired"]).default("pending").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  completedAt: timestamp("completedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

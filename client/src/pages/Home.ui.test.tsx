@@ -23,7 +23,14 @@ vi.mock("@/lib/trpc", () => ({
     auth: { pinMe: { useQuery: () => ({ data: { profile: { displayName: "学習者の名前", avatarUrl: "/manus-storage/profile-test.png" } } }) } },
     profile: { updateName: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) }, uploadAvatar: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ avatarUrl: "/manus-storage/profile-test.png" }), isPending: false }) } },
     monster: { dashboard: { useQuery: () => ({ data: { eggs: [] } }) } },
-    market: { wallet: { useQuery: () => ({ data: { balance: 200 }, isLoading: false }) } },
+    market: {
+      wallet: { useQuery: () => ({ data: { balance: 200 }, isLoading: false }) },
+      history: { useQuery: () => ({ data: [], isFetching: false }) },
+      transfer: { useQuery: () => ({ data: undefined, isFetching: false, refetch: vi.fn() }) },
+      createTransfer: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
+      confirmTransfer: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
+      sendTransfer: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
+    },
     calendar: { dashboard: { useQuery: () => ({ data: { revivalTickets: 2 } }) } },
     smartNotifications: {
       settings: { useQuery: () => ({ data: { wordbookId: 1, direction: "question" as const, enabled: true, startTime: "08:00", endTime: "21:00" } }) },
@@ -366,6 +373,17 @@ describe("ホーム通知UI", () => {
     expect(screen.getByText("学習ミッション")).toBeTruthy();
     expect(screen.getByText("今週の目標を確認しましょう。")).toBeTruthy();
     expect(notice.className).not.toContain("shadow-[0_0_18px");
+  });
+
+  it("マーケットコインを開くと履歴とシェアを切り替えられる", () => {
+    render(<Header page="ホーム" onBack={vi.fn()} onProfile={vi.fn()} />);
+    fireEvent.click(screen.getByLabelText("マーケットコイン 200"));
+    expect(screen.getByRole("heading", { name: "マーケットコイン" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "シェア" }));
+    expect(screen.getByRole("button", { name: /送る/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /送られる/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /送られる/ }));
+    expect(screen.getByRole("button", { name: /カメラを起動/ })).toBeTruthy();
   });
 });
 
