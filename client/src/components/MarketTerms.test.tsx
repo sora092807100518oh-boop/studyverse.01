@@ -26,14 +26,15 @@ describe("利用規約", () => {
   it("ファイルを開いて同意チェックを入れるまで開始できず、同意後にAPIを呼ぶ", async () => {
     hooks.accept.mockResolvedValue({ accepted: true, alreadyAccepted: false });
     render(<MarketTerms />);
-    fireEvent.click(screen.getByRole("button", { name: /マーケット利用規約/ }));
+    expect(screen.getByRole("dialog", { name: "マーケット利用規約への同意" })).toBeTruthy();
     expect(screen.getByTitle("マーケット利用規約")).toBeTruthy();
-    const start = screen.getByRole("button", { name: "同意して利用を開始" }) as HTMLButtonElement;
+    const start = screen.getByRole("button", { name: "始める" }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
     fireEvent.click(screen.getByLabelText("上記の利用規約に同意する"));
     expect(start.disabled).toBe(false);
     fireEvent.click(start);
     await waitFor(() => expect(hooks.accept).toHaveBeenCalledWith({ termId: 1 }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "マーケット利用規約への同意" })).toBeNull());
   });
 
   it("管理画面で利用規約名とファイルを追加できる", async () => {

@@ -1,6 +1,6 @@
 import { Check, FileText, Trash2, Upload, X } from "lucide-react";
 import React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
 
@@ -23,38 +23,55 @@ export function MarketTerms() {
   const terms = trpc.market.terms.list.useQuery(undefined, { retry: false, staleTime: 30_000 });
   const accept = trpc.market.terms.accept.useMutation();
   const utils = trpc.useUtils();
+  const [acceptedIds, setAcceptedIds] = useState<Set<number>>(new Set());
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [checked, setChecked] = useState(false);
-  const selected = (terms.data ?? []).find(term => term.id === selectedId) ?? null;
+  const list = terms.data ?? [];
+  const acceptanceFingerprint = list.map(term => `${term.id}:${term.accepted ? "1" : "0"}`).join(",");
+  const pending = list.filter(term => !acceptedIds.has(term.id) && !term.accepted);
+  const selected = list.find(term => term.id === selectedId) ?? null;
 
-  const open = (term: NonNullable<typeof terms.data>[number]) => {
-    setSelectedId(term.id);
-    setChecked(term.accepted);
-  };
-  const close = () => {
-    setSelectedId(null);
+  useEffect(() => {
+    if (!terms.data) return;
+    const accepted = new Set(list.filter(term => term.accepted).map(term => term.id));
+    const firstPending = list.find(term => !accepted.has(term.id));
+    setAcceptedIds(accepted);
+    setSelectedId(current => current && list.some(term => term.id === current && !accepted.has(term.id)) ? current : firstPending?.id ?? null);
     setChecked(false);
-  };
+  }, [acceptanceFingerprint]);
+
   const start = async () => {
     if (!selected || !checked) return;
     try {
       await accept.mutateAsync({ termId: selected.id });
-      await utils.market.terms.list.invalidate();
-      toast.success("利用規約に同意しました。利用を開始できます。");
-      close();
+      const nextAccepted = new Set(acceptedIds);
+      nextAccepted.add(selected.id);
+      setAcceptedIds(nextAccepted);
+      const next = list.find(term => !nextAccepted.has(term.id));
+      if (next) {
+        setSelectedId(next.id);
+        setChecked(false);
+      } else {
+        setSelectedId(null);
+        setChecked(false);
+        await utils.market.terms.list.invalidate();
+        toast.success("利用規約に同意しました。マーケットを利用できます。");
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "同意を保存できませんでした。");
     }
   };
 
-  return <section className="glass-card rounded-[26px] p-4" aria-label="利用規約">
-    <div className="flex items-start gap-3">
-      <div className="grid h-10 w-10 place-items-center rounded-xl bg-violet-300/12 text-violet-100"><FileText className="h-5 w-5" /></div>
-      <div><p className="eyebrow">market terms</p><h2 className="mt-1 text-lg font-bold">利用規約</h2><p className="mt-1 text-xs leading-5 text-slate-400">ファイルを開いて内容を確認し、同意すると利用を開始できます。</p></div>
-    </div>
-    {terms.isLoading ? <p className="mt-4 text-xs text-slate-400">利用規約を読み込んでいます…</p> : terms.isError ? <p className="mt-4 rounded-xl bg-red-400/10 p-3 text-xs text-red-100">利用規約を取得できませんでした。</p> : (terms.data ?? []).length ? <div className="mt-4 grid gap-2 sm:grid-cols-2">{(terms.data ?? []).map(term => <button key={term.id} type="button" onClick={() => open(term)} className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/25 p-3 text-left transition hover:border-violet-200/30"><FileText className="h-5 w-5 shrink-0 text-violet-200" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold">{term.title}</span><span className="mt-1 block truncate text-[10px] text-slate-500">{term.fileName}</span></span>{term.accepted ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-300/12 px-2 py-1 text-[10px] font-bold text-emerald-200"><Check className="h-3 w-3" />同意済み</span> : <span className="text-[10px] text-violet-200">読む</span>}</button>)}</div> : <p className="mt-4 rounded-xl bg-slate-950/30 p-3 text-xs text-slate-500">現在公開されている利用規約はありません。</p>}
-    {selected && <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`${selected.title}の利用規約`}><section className="glass-card mx-auto mt-5 flex min-h-[calc(100vh-2.5rem)] w-full max-w-3xl flex-col rounded-[28px] p-4 sm:p-5"><div className="flex items-start justify-between gap-3"><div><p className="eyebrow">terms document</p><h3 className="mt-1 text-xl font-bold">{selected.title}</h3><p className="mt-1 text-xs text-slate-500">{selected.fileName}</p></div><button type="button" aria-label="利用規約を閉じる" onClick={close} className="grid h-9 w-9 place-items-center rounded-xl bg-white/10"><X className="h-4 w-4" /></button></div><div className="mt-4 min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/10 bg-white"><iframe src={selected.fileUrl} title={selected.title} className="h-[min(62vh,620px)] w-full" /></div><label className="mt-4 flex cursor-pointer items-center gap-3 rounded-2xl border border-violet-200/20 bg-violet-300/[.06] p-3 text-sm font-bold"><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} className="h-5 w-5 accent-violet-400" />上記の利用規約に同意する</label><button type="button" onClick={() => void start()} disabled={!checked || accept.isPending} className="mt-3 w-full rounded-2xl bg-violet-300 py-3 text-sm font-extrabold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50">{accept.isPending ? "保存しています…" : selected.accepted ? "利用を開始する" : "同意して利用を開始"}</button></section></div>}
-  </section>;
+  if (terms.isLoading || terms.isError || !list.length || !selected) return null;
+  return <div className="fixed inset-0 z-[60] grid place-items-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="マーケット利用規約への同意">
+    <section className="glass-card my-auto w-full max-w-xl rounded-[28px] p-5 shadow-2xl sm:p-6">
+      <div className="flex items-start gap-3"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-violet-300/15 text-violet-100"><FileText className="h-5 w-5" /></div><div><p className="eyebrow">market terms</p><h2 className="mt-1 text-xl font-extrabold">マーケットを始める前に</h2><p className="mt-2 text-xs leading-5 text-slate-400">利用規約を確認し、同意するとマーケットを利用できます。</p></div></div>
+      <div className="mt-4 flex flex-wrap gap-2">{list.map(term => <button key={term.id} type="button" onClick={() => { setSelectedId(term.id); setChecked(acceptedIds.has(term.id) || term.accepted); }} className={`rounded-full border px-3 py-2 text-xs font-bold ${term.id === selected.id ? "border-violet-200/50 bg-violet-300/15 text-violet-100" : "border-white/10 bg-white/[.04] text-slate-300"}`}>{term.title}{(acceptedIds.has(term.id) || term.accepted) && <Check className="ml-1 inline h-3 w-3 text-emerald-300" />}</button>)}</div>
+      <p className="mt-4 text-xs font-bold text-slate-300">{selected.title}</p><div className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-white"><iframe src={selected.fileUrl} title={selected.title} className="h-[min(46vh,420px)] w-full" /></div>
+      <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-2xl border border-violet-200/20 bg-violet-300/[.06] p-3 text-sm font-bold"><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} className="h-5 w-5 accent-violet-400" />上記の利用規約に同意する</label>
+      <button type="button" onClick={() => void start()} disabled={!checked || accept.isPending} className="mt-3 w-full rounded-2xl bg-violet-300 py-3.5 text-sm font-extrabold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50">{accept.isPending ? "保存しています…" : pending.length > 1 ? "同意して次へ" : "始める"}</button>
+    </section>
+  </div>;
 }
 
 export function MarketTermsAdmin() {
