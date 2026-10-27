@@ -99,6 +99,7 @@ describe("対象教室の権限制御", () => {
     render(<TargetClassroomSelect value="all" onChange={onChange} isSiteAdmin rooms={[{ id: 5, name: "検証教室", code: "UI-TEST" }, { id: 6, name: "別教室", code: "UI-OTHER" }]} />);
     expect(screen.getByRole("option", { name: "すべての教室" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "検証教室｜UI-TEST" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "保存のみ（配布しない）" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("対象教室"), { target: { value: "6" } });
     expect(onChange).toHaveBeenCalledWith("6");
   });
@@ -107,7 +108,9 @@ describe("対象教室の権限制御", () => {
     render(<TargetClassroomSelect value="5" onChange={vi.fn()} isSiteAdmin={false} rooms={[{ id: 5, name: "検証教室", code: "UI-TEST" }]} />);
     expect(screen.getByRole("option", { name: "検証教室｜UI-TEST" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "すべての教室" })).toBeNull();
+    expect(screen.getByRole("option", { name: "保存のみ（配布しない）" })).toBeTruthy();
     expect(resolveTarget("5", false)).toEqual({ allClassrooms: false, classroomId: 5 });
     expect(resolveTarget("all", true)).toEqual({ allClassrooms: true, classroomId: undefined });
+    expect(resolveTarget("saved", true)).toEqual({ allClassrooms: false, classroomId: undefined });
   });
 });
