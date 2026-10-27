@@ -7,7 +7,7 @@ const hooks = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   invalidate: vi.fn().mockResolvedValue(undefined),
-  announcements: [] as Array<{ id: number; title: string; body: string; publishedAt: Date }>,
+  announcements: [] as Array<{ id: number; title: string; body: string; publishedAt: Date; grantCoins?: number; claimedCoins?: boolean }>,
   sendTestResult: { sent: 1 } as { sent: number; skipped?: string },
 }));
 
@@ -54,6 +54,7 @@ vi.mock("@/lib/trpc", () => ({
       online: { list: { useQuery: () => ({ data: { classroom: { id: 1, name: "テスト教室" }, members: [] }, isLoading: false, isError: false, refetch: vi.fn() }) }, ping: { useMutation: () => ({ mutateAsync: vi.fn().mockResolvedValue({ online: true }) }) } },
       announcements: {
         list: { useQuery: () => ({ data: hooks.announcements, isLoading: false, isError: false, refetch: vi.fn() }) },
+        claimCoins: { useMutation: () => ({ mutateAsync: hooks.mutateAsync, isPending: false }) },
       },
       recommendedTests: {
         announcements: { useQuery: () => ({ data: [], isLoading: false, isError: false, refetch: vi.fn() }) },

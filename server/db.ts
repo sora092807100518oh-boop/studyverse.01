@@ -2,7 +2,7 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import webpush from "web-push";
-import { activityLogs, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketCoinTransactions, marketCoinTransfers, marketDownloads, marketItems, marketReviews, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcementCoinClaims, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketCoinTransactions, marketCoinTransfers, marketDownloads, marketItems, marketReviews, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -462,7 +462,11 @@ export async function listVisibleAnnouncements(userId: number) {
   const profile = await getProfile(userId);
   const visible = profile ? or(eq(announcements.visibility, "global"), and(eq(announcements.visibility, "classroom"), eq(announcements.classroomId, profile.profile.classroomId))) : eq(announcements.visibility, "global");
   const availableNow = or(isNull(announcements.scheduledAt), lte(announcements.scheduledAt, new Date()));
-  return db.select().from(announcements).where(and(visible, availableNow)).orderBy(desc(announcements.publishedAt));
+  const notExpired = or(isNull(announcements.expiresAt), gte(announcements.expiresAt, new Date()));
+  const rows = await db.select().from(announcements).where(and(visible, availableNow, notExpired)).orderBy(desc(announcements.publishedAt));
+  const claims = await db.select({ announcementId: announcementCoinClaims.announcementId }).from(announcementCoinClaims).where(eq(announcementCoinClaims.userId, userId));
+  const claimed = new Set(claims.map(item => item.announcementId));
+  return rows.map(item => ({ ...item, claimedCoins: item.grantCoins > 0 && claimed.has(item.id) }));
 }
 
 async function getAnnouncementManagementScope(userId: number) {
@@ -518,14 +522,49 @@ async function requireAnnouncementEditor(userId: number, announcementId: number)
   return { db, announcement: row[0], scope };
 }
 
-export async function createAnnouncement(userId: number, input: { title: string; body: string; visibility: "classroom" | "global"; expiresAt?: Date; scheduledAt?: Date; classroomId?: number }) {
+export async function createAnnouncement(userId: number, input: { title: string; body: string; visibility: "classroom" | "global"; expiresAt?: Date; scheduledAt?: Date; classroomId?: number; grantCoins?: number }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const scope = await getAnnouncementManagementScope(userId);
   const classroomId = await resolveAnnouncementClassroomId(scope, input.visibility, input.classroomId);
-  const result = await db.insert(announcements).values({ classroomId, authorUserId: userId, title: input.title, body: input.body, visibility: input.visibility, scheduledAt: input.scheduledAt ?? null, expiresAt: input.expiresAt ?? null }).$returningId();
+  const grantCoins = Math.max(0, Math.min(100000, Math.floor(input.grantCoins ?? 0)));
+  const result = await db.insert(announcements).values({ classroomId, authorUserId: userId, title: input.title, body: input.body, visibility: input.visibility, grantCoins, scheduledAt: input.scheduledAt ?? null, expiresAt: input.expiresAt ?? null }).$returningId();
   await writeActivity({ actorUserId: userId, classroomId: classroomId ?? undefined, category: "classroom", action: "announcement.created", details: input.title });
   return result[0];
+}
+
+export async function claimAnnouncementCoins(userId: number, announcementId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const profile = await getProfile(userId);
+  const now = new Date();
+  const visible = profile ? or(eq(announcements.visibility, "global"), and(eq(announcements.visibility, "classroom"), eq(announcements.classroomId, profile.profile.classroomId))) : eq(announcements.visibility, "global");
+  const item = (await db.select().from(announcements).where(and(eq(announcements.id, announcementId), visible, lte(announcements.publishedAt, now), or(isNull(announcements.scheduledAt), lte(announcements.scheduledAt, now)), or(isNull(announcements.expiresAt), gte(announcements.expiresAt, now)))).limit(1))[0];
+  if (!item || item.grantCoins <= 0) throw new Error("ANNOUNCEMENT_COINS_NOT_AVAILABLE");
+  const existing = (await db.select().from(announcementCoinClaims).where(and(eq(announcementCoinClaims.announcementId, announcementId), eq(announcementCoinClaims.userId, userId))).limit(1))[0];
+  if (existing) return { alreadyClaimed: true, amount: existing.amount, balance: (await getMarketCoinWallet(userId)).balance };
+  await db.transaction(async tx => {
+    await tx.insert(announcementCoinClaims).values({ announcementId, userId, amount: item.grantCoins });
+    await tx.update(users).set({ marketCoins: sql`${users.marketCoins} + ${item.grantCoins}` }).where(eq(users.id, userId));
+    await tx.insert(marketCoinTransactions).values({ userId, counterpartyUserId: item.authorUserId, marketItemId: null, amount: item.grantCoins, type: "announcement_grant", referenceKey: `announcement:${announcementId}:${userId}` });
+  });
+  return { alreadyClaimed: false, amount: item.grantCoins, balance: (await getMarketCoinWallet(userId)).balance };
+}
+
+export async function grantCoinsToMember(actorUserId: number, profileId: number, amount: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const value = Math.floor(amount);
+  if (!Number.isInteger(value) || value < 1 || value > 100000) throw new Error("COIN_AMOUNT_INVALID");
+  const target = (await db.select({ profile: studentProfiles, classroom: classrooms }).from(studentProfiles).innerJoin(classrooms, eq(studentProfiles.classroomId, classrooms.id)).where(eq(studentProfiles.id, profileId)).limit(1))[0];
+  if (!target || target.profile.classroomRole !== "student") throw new Error("MEMBER_NOT_FOUND");
+  const account = (await db.select({ role: users.role }).from(users).where(eq(users.id, actorUserId)).limit(1))[0];
+  if (account?.role !== "admin") { const manager = await requireClassroomManager(actorUserId); if (manager.profile.classroomId !== target.profile.classroomId) throw new Error("MEMBER_DETAIL_FORBIDDEN"); }
+  await db.transaction(async tx => {
+    await tx.update(users).set({ marketCoins: sql`${users.marketCoins} + ${value}` }).where(eq(users.id, target.profile.userId));
+    await tx.insert(marketCoinTransactions).values({ userId: target.profile.userId, counterpartyUserId: actorUserId, marketItemId: null, amount: value, type: "admin_grant", referenceKey: `admin-grant:${actorUserId}:${target.profile.userId}:${randomUUID()}` });
+  });
+  return { success: true, amount: value, balance: (await getMarketCoinWallet(target.profile.userId)).balance };
 }
 
 export async function updateAnnouncement(userId: number, announcementId: number, input: { title?: string; body?: string; visibility?: "classroom" | "global"; expiresAt?: Date | null; scheduledAt?: Date | null; classroomId?: number }) {

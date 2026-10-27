@@ -182,10 +182,19 @@ export const announcements = mysqlTable("announcements", {
   visibility: mysqlEnum("visibility", ["classroom", "global"]).default("classroom").notNull(),
   title: varchar("title", { length: 160 }).notNull(),
   body: text("body").notNull(),
+  grantCoins: int("grantCoins").default(0).notNull(),
   publishedAt: timestamp("publishedAt").defaultNow().notNull(),
   scheduledAt: timestamp("scheduledAt"),
   expiresAt: timestamp("expiresAt"),
 });
+
+export const announcementCoinClaims = mysqlTable("announcementCoinClaims", {
+  id: int("id").autoincrement().primaryKey(),
+  announcementId: int("announcementId").notNull(),
+  userId: int("userId").notNull(),
+  amount: int("amount").notNull(),
+  claimedAt: timestamp("claimedAt").defaultNow().notNull(),
+}, table => [uniqueIndex("announcement_coin_claims_announcement_user_unique").on(table.announcementId, table.userId)]);
 
 export const calendarEvents = mysqlTable("calendarEvents", {
   id: int("id").autoincrement().primaryKey(),
@@ -271,7 +280,7 @@ export const marketCoinTransactions = mysqlTable("marketCoinTransactions", {
   counterpartyUserId: int("counterpartyUserId"),
   marketItemId: int("marketItemId"),
   amount: int("amount").notNull(),
-  type: mysqlEnum("type", ["welcome", "market_purchase", "market_sale", "coin_transfer_send", "coin_transfer_receive"]).notNull(),
+  type: mysqlEnum("type", ["welcome", "market_purchase", "market_sale", "coin_transfer_send", "coin_transfer_receive", "admin_grant", "announcement_grant"]).notNull(),
   referenceKey: varchar("referenceKey", { length: 160 }).notNull().unique(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
