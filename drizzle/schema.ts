@@ -255,6 +255,24 @@ export const marketItems = mysqlTable("marketItems", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const marketTerms = mysqlTable("marketTerms", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 160 }).notNull(),
+  fileName: varchar("fileName", { length: 255 }).notNull(),
+  fileUrl: varchar("fileUrl", { length: 2048 }).notNull(),
+  storageKey: varchar("storageKey", { length: 512 }).notNull(),
+  mimeType: varchar("mimeType", { length: 120 }).notNull(),
+  uploadedBy: int("uploadedBy").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const marketTermConsents = mysqlTable("marketTermConsents", {
+  id: int("id").autoincrement().primaryKey(),
+  termId: int("termId").notNull(),
+  userId: int("userId").notNull(),
+  acceptedAt: timestamp("acceptedAt").defaultNow().notNull(),
+}, table => [uniqueIndex("market_term_consents_term_user_unique").on(table.termId, table.userId)]);
+
 export const marketDownloads = mysqlTable("marketDownloads", {
   id: int("id").autoincrement().primaryKey(),
   marketItemId: int("marketItemId").notNull(),

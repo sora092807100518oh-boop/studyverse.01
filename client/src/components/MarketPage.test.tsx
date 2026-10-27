@@ -7,7 +7,7 @@ const marketItems = [{ id: 1, name: "旅行英語スターター", imageUrl: "/m
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ market: { list: { invalidate: hooks.invalidate }, wallet: { invalidate: hooks.invalidate }, manage: { invalidate: hooks.invalidate } }, wordbooks: { list: { invalidate: hooks.invalidate } } }),
+    useUtils: () => ({ market: { list: { invalidate: hooks.invalidate }, wallet: { invalidate: hooks.invalidate }, manage: { invalidate: hooks.invalidate }, terms: { list: { invalidate: hooks.invalidate } } }, wordbooks: { list: { invalidate: hooks.invalidate } } }),
     market: {
       list: { useQuery: () => ({ data: marketItems, isLoading: false, isError: false }) },
       wallet: { useQuery: () => ({ data: { balance: 200 }, isLoading: false }) },
@@ -16,6 +16,7 @@ vi.mock("@/lib/trpc", () => ({
       review: { useMutation: () => ({ mutateAsync: hooks.review, isPending: false }) },
       manage: { useQuery: () => ({ data: [], isLoading: false, isError: false }) },
       moderate: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) },
+      terms: { list: { useQuery: () => ({ data: [], isLoading: false, isError: false }) }, upload: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) }, delete: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) }, accept: { useMutation: () => ({ mutateAsync: vi.fn(), isPending: false }) } },
     },
     wordbooks: { list: { useQuery: () => ({ data: [{ id: 7, title: "自作単語帳", wordCount: 12, visibility: "private", canEdit: true }], isLoading: false }) } },
   },

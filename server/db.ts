@@ -2,7 +2,7 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import webpush from "web-push";
-import { activityLogs, announcementCoinClaims, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketCoinTransactions, marketCoinTransfers, marketDownloads, marketItems, marketReviews, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcementCoinClaims, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketCoinTransactions, marketCoinTransfers, marketDownloads, marketItems, marketReviews, marketTermConsents, marketTerms, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -1529,6 +1529,48 @@ async function assertSiteAdmin(userId: number) {
   const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
   if (account[0]?.role !== "admin") throw new Error("GLOBAL_MANAGER_REQUIRED");
   return db;
+}
+
+const allowedMarketTermTypes = new Set(["application/pdf", "text/plain", "text/markdown", "image/png", "image/jpeg", "image/webp"]);
+
+export async function listMarketTerms(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select().from(marketTerms).orderBy(desc(marketTerms.createdAt));
+  const consents = await db.select({ termId: marketTermConsents.termId }).from(marketTermConsents).where(eq(marketTermConsents.userId, userId));
+  const accepted = new Set(consents.map(item => item.termId));
+  return rows.map(item => ({ ...item, accepted: accepted.has(item.id) }));
+}
+
+export async function uploadMarketTerm(userId: number, input: { title: string; fileName: string; dataUrl: string }) {
+  const db = await assertSiteAdmin(userId);
+  const match = /^data:([^;]+);base64,([a-zA-Z0-9+/=]+)$/.exec(input.dataUrl);
+  if (!match || !allowedMarketTermTypes.has(match[1])) throw new Error("MARKET_TERM_FILE_INVALID");
+  const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 10_000_000) throw new Error("MARKET_TERM_FILE_INVALID");
+  const safeName = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-120) || "terms-file";
+  const uploaded = await storagePut(`market-terms/${userId}/${randomUUID()}-${safeName}`, buffer, match[1]);
+  const inserted = await db.insert(marketTerms).values({ title: input.title.trim(), fileName: input.fileName.trim(), fileUrl: uploaded.url, storageKey: uploaded.key, mimeType: match[1], uploadedBy: userId }).$returningId();
+  await writeActivity({ actorUserId: userId, category: "classroom", action: "marketTerms.uploaded", details: input.title.trim() });
+  return { id: inserted[0]?.id, url: uploaded.url };
+}
+
+export async function deleteMarketTerm(userId: number, termId: number) {
+  const db = await assertSiteAdmin(userId);
+  await db.delete(marketTermConsents).where(eq(marketTermConsents.termId, termId));
+  await db.delete(marketTerms).where(eq(marketTerms.id, termId));
+  return { success: true } as const;
+}
+
+export async function acceptMarketTerm(userId: number, termId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const term = await db.select({ id: marketTerms.id }).from(marketTerms).where(eq(marketTerms.id, termId)).limit(1);
+  if (!term[0]) throw new Error("MARKET_TERM_NOT_FOUND");
+  const existing = await db.select({ id: marketTermConsents.id }).from(marketTermConsents).where(and(eq(marketTermConsents.termId, termId), eq(marketTermConsents.userId, userId))).limit(1);
+  if (existing[0]) return { accepted: true, alreadyAccepted: true } as const;
+  await db.insert(marketTermConsents).values({ termId, userId });
+  return { accepted: true, alreadyAccepted: false } as const;
 }
 
 async function decorateMarketItem(userId: number, item: typeof marketItems.$inferSelect, db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
