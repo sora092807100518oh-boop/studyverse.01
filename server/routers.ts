@@ -222,7 +222,7 @@ export const appRouter = router({
         if (!account) return null;
         try { return await getOAuthClassroomApplication(account.id, input.classroomCode); } catch (error) { return toUserMessage(error); }
       }),
-      request: publicProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/) })).mutation(async ({ ctx, input }) => {
+      request: publicProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/).optional() })).mutation(async ({ ctx, input }) => {
         const account = await sdk.authenticateRequest(ctx.req).catch(() => null);
         if (!account) throw new TRPCError({ code: "UNAUTHORIZED", message: "アカウント認証を完了してから申請してください。" });
         try { return await requestOAuthClassroomApplication(account.id, input.classroomCode); } catch (error) { return toUserMessage(error); }

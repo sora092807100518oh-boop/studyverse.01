@@ -39,11 +39,11 @@ describe("OAuth selected school", () => {
       const book = await db.insert(wordbooks).values({ title: `OAuth Test ${suffix}`, subject: "english", ownerUserId: admin.id, classroomId: room[0].id, visibility: "classroom" }).$returningId();
       books.push(book[0].id);
     }
-    for (const suffix of ["A", "B"]) {
+    const first = await authenticateWithOAuth(userId, { classroomCode: `OAT-${key}-A` });
+    for (const suffix of ["B"]) {
       const application = await requestOAuthClassroomApplication(userId, `OAT-${key}-${suffix}`);
       await reviewOAuthClassroomApplication(admin.id, application.applicationId!, "approved");
     }
-    const first = await authenticateWithOAuth(userId, { classroomCode: `OAT-${key}-A` });
     const second = await authenticateWithOAuth(userId, { classroomCode: `OAT-${key}-B` });
     expect(first.profile.id).not.toBe(second.profile.id);
     for (const [index, session] of [first, second].entries()) {
@@ -55,5 +55,12 @@ describe("OAuth selected school", () => {
       expect(visible.some(book => book.id === books[index])).toBe(true);
       expect(visible.some(book => book.id === books[index === 0 ? 1 : 0])).toBe(false);
     }
+    const personalApplication = await requestOAuthClassroomApplication(userId);
+    expect(personalApplication.status).toBe("pending");
+    await expect(authenticateWithOAuth(userId, {})).rejects.toThrow("APPLICATION_PENDING");
+    await reviewOAuthClassroomApplication(admin.id, personalApplication.applicationId!, "approved");
+    const personal = await authenticateWithOAuth(userId, {});
+    rooms.push(personal.classroom.id);
+    expect(personal.classroom.name).toBe("個人学習");
   }, 60_000);
 });

@@ -134,7 +134,7 @@ describe("OAuthログイン画面", () => {
     render(<LoginGate {...gateProps} />);
     expect(screen.getByText("① school id")).toBeTruthy();
     expect(screen.getByText("学校IDを入力")).toBeTruthy();
-    expect(screen.getByText("学校IDがなければ、空欄のまま個人利用として進められます。")).toBeTruthy();
+    expect(screen.getByText("学校IDがなければ、空欄のまま個人利用を申請できます。")).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText("例：STAR-2026"), { target: { value: "school-2026" } });
     fireEvent.click(screen.getByRole("button", { name: "Google／Appleでログイン" }));
     expect(gateProps.onOAuthLogin).toHaveBeenCalledWith({ schoolId: "SCHOOL-2026" });

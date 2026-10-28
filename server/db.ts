@@ -1763,11 +1763,20 @@ export async function clearLoginBackground(userId: number) {
   return { imageUrl: null as string | null };
 }
 
-export async function requestOAuthClassroomApplication(userId: number, classroomCode: string) {
+export async function requestOAuthClassroomApplication(userId: number, classroomCode?: string) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
-  const normalizedCode = classroomCode.trim().toUpperCase();
-  const classroom = (await db.select().from(classrooms).where(eq(classrooms.code, normalizedCode)).limit(1))[0];
+  const normalizedCode = classroomCode?.trim().toUpperCase();
+  let classroom = normalizedCode ? (await db.select().from(classrooms).where(eq(classrooms.code, normalizedCode)).limit(1))[0] : undefined;
+  if (!classroom) {
+    if (normalizedCode) throw new Error("CLASSROOM_NOT_FOUND");
+    const personalCode = `OAUTH-${userId}`;
+    classroom = (await db.select().from(classrooms).where(eq(classrooms.code, personalCode)).limit(1))[0];
+    if (!classroom) {
+      const created = await db.insert(classrooms).values({ code: personalCode, name: "個人学習", teacherUserId: null }).$returningId();
+      classroom = created[0]?.id ? (await db.select().from(classrooms).where(eq(classrooms.id, created[0].id)).limit(1))[0] : undefined;
+    }
+  }
   if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
   const existingProfile = (await db.select({ id: studentProfiles.id }).from(studentProfiles).where(and(eq(studentProfiles.userId, userId), eq(studentProfiles.classroomId, classroom.id))).limit(1))[0];
   if (existingProfile) return { status: "approved" as const, applicationId: null, classroom: { id: classroom.id, code: classroom.code, name: classroom.name } };
@@ -1844,7 +1853,7 @@ export async function authenticateWithOAuth(userId: number, input: { classroomCo
     }
   }
   if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
-  if (normalizedCode) {
+  if (!normalizedCode) {
     const existingProfile = (await db.select({ id: studentProfiles.id }).from(studentProfiles).where(and(eq(studentProfiles.userId, userId), eq(studentProfiles.classroomId, classroom.id))).limit(1))[0];
     if (!existingProfile) {
       const application = (await db.select({ status: oauthClassroomApplications.status }).from(oauthClassroomApplications).where(and(eq(oauthClassroomApplications.userId, userId), eq(oauthClassroomApplications.classroomId, classroom.id))).limit(1))[0];
