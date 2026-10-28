@@ -42,6 +42,16 @@ export const studentProfiles = mysqlTable("studentProfiles", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 }, table => [uniqueIndex("studentProfiles_classroom_pin_lookup_unique").on(table.classroomId, table.pinLookupHash)]);
 
+export const oauthClassroomApplications = mysqlTable("oauthClassroomApplications", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  classroomId: int("classroomId").notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  requestedAt: timestamp("requestedAt").defaultNow().notNull(),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewedBy: int("reviewedBy"),
+}, table => [uniqueIndex("oauth_classroom_applications_user_classroom_unique").on(table.userId, table.classroomId)]);
+
 export const pinSessions = mysqlTable("pinSessions", {
   id: int("id").autoincrement().primaryKey(),
   tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),

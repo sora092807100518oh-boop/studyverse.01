@@ -27,6 +27,7 @@ describe("利用規約", () => {
     hooks.accept.mockResolvedValue({ accepted: true, alreadyAccepted: false });
     render(<MarketTerms />);
     expect(screen.getByRole("dialog", { name: "マーケット利用規約への同意" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "マーケット利用規約" }));
     expect(screen.getByTitle("マーケット利用規約")).toBeTruthy();
     const start = screen.getByRole("button", { name: "始める" }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);

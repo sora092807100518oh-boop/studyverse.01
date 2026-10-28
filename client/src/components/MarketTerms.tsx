@@ -34,9 +34,8 @@ export function MarketTerms() {
   useEffect(() => {
     if (!terms.data) return;
     const accepted = new Set(list.filter(term => term.accepted).map(term => term.id));
-    const firstPending = list.find(term => !accepted.has(term.id));
     setAcceptedIds(accepted);
-    setSelectedId(current => current && list.some(term => term.id === current && !accepted.has(term.id)) ? current : firstPending?.id ?? null);
+    setSelectedId(current => current && list.some(term => term.id === current && !accepted.has(term.id)) ? current : null);
     setChecked(false);
   }, [acceptanceFingerprint]);
 
@@ -62,14 +61,12 @@ export function MarketTerms() {
     }
   };
 
-  if (terms.isLoading || terms.isError || !list.length || !selected) return null;
+  if (terms.isLoading || terms.isError || !list.length || (!pending.length && !selected)) return null;
   return <div className="fixed inset-0 z-[60] grid place-items-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="マーケット利用規約への同意">
     <section className="glass-card my-auto w-full max-w-xl rounded-[28px] p-5 shadow-2xl sm:p-6">
       <div className="flex items-start gap-3"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-violet-300/15 text-violet-100"><FileText className="h-5 w-5" /></div><div><p className="eyebrow">market terms</p><h2 className="mt-1 text-xl font-extrabold">マーケットを始める前に</h2><p className="mt-2 text-xs leading-5 text-slate-400">利用規約を確認し、同意するとマーケットを利用できます。</p></div></div>
-      <div className="mt-4 flex flex-wrap gap-2">{list.map(term => <button key={term.id} type="button" onClick={() => { setSelectedId(term.id); setChecked(acceptedIds.has(term.id) || term.accepted); }} className={`rounded-full border px-3 py-2 text-xs font-bold ${term.id === selected.id ? "border-violet-200/50 bg-violet-300/15 text-violet-100" : "border-white/10 bg-white/[.04] text-slate-300"}`}>{term.title}{(acceptedIds.has(term.id) || term.accepted) && <Check className="ml-1 inline h-3 w-3 text-emerald-300" />}</button>)}</div>
-      <p className="mt-4 text-xs font-bold text-slate-300">{selected.title}</p><div className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-white"><iframe src={selected.fileUrl} title={selected.title} className="h-[min(46vh,420px)] w-full" /></div>
-      <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-2xl border border-violet-200/20 bg-violet-300/[.06] p-3 text-sm font-bold"><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} className="h-5 w-5 accent-violet-400" />上記の利用規約に同意する</label>
-      <button type="button" onClick={() => void start()} disabled={!checked || accept.isPending} className="mt-3 w-full rounded-2xl bg-violet-300 py-3.5 text-sm font-extrabold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50">{accept.isPending ? "保存しています…" : pending.length > 1 ? "同意して次へ" : "始める"}</button>
+      <div className="mt-4 flex flex-wrap gap-2">{list.map(term => <button key={term.id} type="button" onClick={() => { setSelectedId(term.id); setChecked(acceptedIds.has(term.id) || term.accepted); }} className={`rounded-full border px-3 py-2 text-xs font-bold ${term.id === selectedId ? "border-violet-200/50 bg-violet-300/15 text-violet-100" : "border-white/10 bg-white/[.04] text-slate-300"}`}>{term.title}{(acceptedIds.has(term.id) || term.accepted) && <Check className="ml-1 inline h-3 w-3 text-emerald-300" />}</button>)}</div>
+      {selected ? <><p className="mt-4 text-xs font-bold text-slate-300">{selected.title}</p><div className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-white"><iframe src={selected.fileUrl} title={selected.title} className="h-[min(58vh,560px)] w-full" /></div><button type="button" onClick={() => { setSelectedId(null); setChecked(false); }} className="mt-3 text-xs font-bold text-violet-200">利用規約の一覧に戻る</button><label className="mt-4 flex cursor-pointer items-center gap-3 rounded-2xl border border-violet-200/20 bg-violet-300/[.06] p-3 text-sm font-bold"><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} className="h-5 w-5 accent-violet-400" />上記の利用規約に同意する</label><button type="button" onClick={() => void start()} disabled={!checked || accept.isPending} className="mt-3 w-full rounded-2xl bg-violet-300 py-3.5 text-sm font-extrabold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50">{accept.isPending ? "保存しています…" : pending.length > 1 ? "同意して次へ" : "始める"}</button></> : <div className="mt-5 rounded-2xl border border-violet-200/15 bg-violet-300/[.06] p-4"><p className="text-sm font-bold text-slate-100">確認する利用規約を選択してください</p><p className="mt-2 text-xs leading-5 text-slate-400">下のファイルをタップすると内容を開けます。PDFはページをスクロールして確認できます。</p></div>}
     </section>
   </div>;
 }

@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { activityLogs, classrooms, pinSessions, studentProfiles, users, wordbooks } from "../drizzle/schema";
-import { authenticateWithOAuth, getDb, getOrCreateSiteAdmin, getProfile } from "./db";
+import { activityLogs, classrooms, oauthClassroomApplications, pinSessions, studentProfiles, users, wordbooks } from "../drizzle/schema";
+import { authenticateWithOAuth, getDb, getOrCreateSiteAdmin, getProfile, requestOAuthClassroomApplication, reviewOAuthClassroomApplication } from "./db";
 import { withActiveMembership } from "./active-membership";
 import { appRouter } from "./routers";
 import type { TrpcContext } from "./_core/context";
@@ -15,6 +15,7 @@ afterAll(async () => {
   if (!db) return;
   if (books.length) await db.delete(wordbooks).where(inArray(wordbooks.id, books));
   if (userId) {
+    await db.delete(oauthClassroomApplications).where(eq(oauthClassroomApplications.userId, userId));
     await db.delete(pinSessions).where(eq(pinSessions.userId, userId));
     await db.delete(activityLogs).where(eq(activityLogs.actorUserId, userId));
     await db.delete(studentProfiles).where(eq(studentProfiles.userId, userId));
@@ -37,6 +38,10 @@ describe("OAuth selected school", () => {
       rooms.push(room[0].id);
       const book = await db.insert(wordbooks).values({ title: `OAuth Test ${suffix}`, subject: "english", ownerUserId: admin.id, classroomId: room[0].id, visibility: "classroom" }).$returningId();
       books.push(book[0].id);
+    }
+    for (const suffix of ["A", "B"]) {
+      const application = await requestOAuthClassroomApplication(userId, `OAT-${key}-${suffix}`);
+      await reviewOAuthClassroomApplication(admin.id, application.applicationId!, "approved");
     }
     const first = await authenticateWithOAuth(userId, { classroomCode: `OAT-${key}-A` });
     const second = await authenticateWithOAuth(userId, { classroomCode: `OAT-${key}-B` });

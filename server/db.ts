@@ -2,7 +2,7 @@ import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import webpush from "web-push";
-import { activityLogs, announcementCoinClaims, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketCoinTransactions, marketCoinTransfers, marketDownloads, marketItems, marketReviews, marketTermConsents, marketTerms, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
+import { activityLogs, announcementCoinClaims, announcements, calendarEvents, classrooms, focusSessions, InsertUser, journalEntries, marketCoinTransactions, marketCoinTransfers, marketDownloads, marketItems, marketReviews, marketTermConsents, marketTerms, monsterEggs, monsterImageSettings, monsterMissionClaims, monsterProfiles, oauthClassroomApplications, pinLoginAttempts, pinSessions, recommendedTestClaims, recommendedTests, revivalDays, savedStudySets, siteAdminSessions, siteSettings, smartNotificationSettings, smartNotificationSubscriptions, studentProfiles, studyRecords, teacherAdminSessions, users, vocabularyWordNotes, vocabularyWords, wordbooks } from "../drizzle/schema";
 import { ENV } from "./_core/env";
 import { createSessionToken, getAttemptKeyHash, getPinLookupHash, getSessionTokenHash, hashPin, verifyPin } from "./pin-auth";
 import { canManageClassroom, canPublishGlobally } from "./classroom-permissions";
@@ -1763,6 +1763,68 @@ export async function clearLoginBackground(userId: number) {
   return { imageUrl: null as string | null };
 }
 
+export async function requestOAuthClassroomApplication(userId: number, classroomCode: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const normalizedCode = classroomCode.trim().toUpperCase();
+  const classroom = (await db.select().from(classrooms).where(eq(classrooms.code, normalizedCode)).limit(1))[0];
+  if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
+  const existingProfile = (await db.select({ id: studentProfiles.id }).from(studentProfiles).where(and(eq(studentProfiles.userId, userId), eq(studentProfiles.classroomId, classroom.id))).limit(1))[0];
+  if (existingProfile) return { status: "approved" as const, applicationId: null, classroom: { id: classroom.id, code: classroom.code, name: classroom.name } };
+  const existing = (await db.select().from(oauthClassroomApplications).where(and(eq(oauthClassroomApplications.userId, userId), eq(oauthClassroomApplications.classroomId, classroom.id))).limit(1))[0];
+  if (existing) {
+    if (existing.status !== "pending") await db.update(oauthClassroomApplications).set({ status: "pending", requestedAt: new Date(), reviewedAt: null, reviewedBy: null }).where(eq(oauthClassroomApplications.id, existing.id));
+    return { status: "pending" as const, applicationId: existing.id, classroom: { id: classroom.id, code: classroom.code, name: classroom.name } };
+  }
+  const inserted = await db.insert(oauthClassroomApplications).values({ userId, classroomId: classroom.id }).$returningId();
+  return { status: "pending" as const, applicationId: inserted[0]?.id ?? null, classroom: { id: classroom.id, code: classroom.code, name: classroom.name } };
+}
+
+export async function getOAuthClassroomApplication(userId: number, classroomCode: string) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const normalizedCode = classroomCode.trim().toUpperCase();
+  const classroom = (await db.select().from(classrooms).where(eq(classrooms.code, normalizedCode)).limit(1))[0];
+  if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
+  const application = (await db.select().from(oauthClassroomApplications).where(and(eq(oauthClassroomApplications.userId, userId), eq(oauthClassroomApplications.classroomId, classroom.id))).limit(1))[0];
+  return application ? { id: application.id, status: application.status, requestedAt: application.requestedAt, reviewedAt: application.reviewedAt, classroom: { id: classroom.id, code: classroom.code, name: classroom.name } } : null;
+}
+
+export async function listOAuthClassroomApplications(actorUserId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, actorUserId)).limit(1);
+  const membership = await getProfile(actorUserId);
+  const rows = await db.select().from(oauthClassroomApplications).where(eq(oauthClassroomApplications.status, "pending"));
+  const visible = rows.filter(row => canManageClassroom({ siteRole: account[0]?.role, classroomRole: membership?.profile.classroomRole, actorClassroomId: membership?.profile.classroomId, targetClassroomId: row.classroomId }));
+  return Promise.all(visible.map(async row => {
+    const applicant = (await db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, row.userId)).limit(1))[0];
+    const classroom = (await db.select({ id: classrooms.id, name: classrooms.name, code: classrooms.code }).from(classrooms).where(eq(classrooms.id, row.classroomId)).limit(1))[0];
+    return { id: row.id, userId: row.userId, applicantName: applicant?.name ?? "未設定", applicantEmail: applicant?.email ?? null, classroom, requestedAt: row.requestedAt };
+  }));
+}
+
+export async function reviewOAuthClassroomApplication(actorUserId: number, applicationId: number, decision: "approved" | "rejected") {
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const application = (await db.select().from(oauthClassroomApplications).where(eq(oauthClassroomApplications.id, applicationId)).limit(1))[0];
+  if (!application) throw new Error("APPLICATION_NOT_FOUND");
+  const account = await db.select({ role: users.role }).from(users).where(eq(users.id, actorUserId)).limit(1);
+  const membership = await getProfile(actorUserId);
+  if (!canManageClassroom({ siteRole: account[0]?.role, classroomRole: membership?.profile.classroomRole, actorClassroomId: membership?.profile.classroomId, targetClassroomId: application.classroomId })) throw new Error("CLASSROOM_MANAGER_REQUIRED");
+  if (decision === "approved") {
+    const existing = (await db.select().from(studentProfiles).where(and(eq(studentProfiles.userId, application.userId), eq(studentProfiles.classroomId, application.classroomId))).limit(1))[0];
+    if (!existing) {
+      const accountInfo = (await db.select({ name: users.name }).from(users).where(eq(users.id, application.userId)).limit(1))[0];
+      const internalSecret = `oauth-${randomUUID()}`;
+      await db.insert(studentProfiles).values({ userId: application.userId, classroomId: application.classroomId, pinHash: await hashPin(internalSecret), pinLookupHash: getPinLookupHash(application.classroomId, internalSecret, getPinPepper()), displayName: accountInfo?.name ?? "学習者", classroomRole: "student" });
+    }
+  }
+  await db.update(oauthClassroomApplications).set({ status: decision, reviewedAt: new Date(), reviewedBy: actorUserId }).where(eq(oauthClassroomApplications.id, applicationId));
+  await writeActivity({ actorUserId, classroomId: application.classroomId, category: "member", action: `oauth_application.${decision}`, details: `application:${applicationId}` });
+  return { success: true, status: decision } as const;
+}
+
 export async function authenticateWithOAuth(userId: number, input: { classroomCode?: string }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
@@ -1782,6 +1844,15 @@ export async function authenticateWithOAuth(userId: number, input: { classroomCo
     }
   }
   if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
+  if (normalizedCode) {
+    const existingProfile = (await db.select({ id: studentProfiles.id }).from(studentProfiles).where(and(eq(studentProfiles.userId, userId), eq(studentProfiles.classroomId, classroom.id))).limit(1))[0];
+    if (!existingProfile) {
+      const application = (await db.select({ status: oauthClassroomApplications.status }).from(oauthClassroomApplications).where(and(eq(oauthClassroomApplications.userId, userId), eq(oauthClassroomApplications.classroomId, classroom.id))).limit(1))[0];
+      if (!application) throw new Error("APPLICATION_REQUIRED");
+      if (application.status === "pending") throw new Error("APPLICATION_PENDING");
+      if (application.status !== "approved") throw new Error("APPLICATION_REJECTED");
+    }
+  }
   let profile = (await db.select().from(studentProfiles).where(and(eq(studentProfiles.userId, userId), eq(studentProfiles.classroomId, classroom.id))).limit(1))[0];
   if (!profile) {
     const internalSecret = `oauth-${randomUUID()}`;

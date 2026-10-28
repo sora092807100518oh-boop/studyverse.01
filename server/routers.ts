@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { acceptMarketTerm, addPersonalClassroomCode, addWordToWordbook, authenticateWithOAuth, authenticateWithPin, claimAnnouncementCoins, claimAnnouncementRecommendedTest, claimRecommendedWordbook, claimAvailableMonsterMissions, claimMonsterMission, completeCoinTransfer, confirmCoinTransferRecipient, createCoinTransferRequest, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, deleteMarketItem, deleteMarketTerm, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, grantCoinsToMember, getCoinTransferRequest, getMarketCoinWallet, listMarketCoinTransactions, getMaintenanceConfig, saveMaintenanceConfig, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, getWordbookCreationPolicy, getLoginBackground, importWordbookCsv, listAnnouncementHistory, listAnnouncementRecommendedTests, listClassroomMembers, listMarketItems, listMarketModerationItems, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMarketTerms, listMonsterImageSettings, listPersonalClassroomCodes, removePersonalClassroomCode, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, uploadLoginBackground, clearLoginBackground, recordAiSelectCompletion, recordFocusSession, recordLearningResult, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveMarketReview, submitMarketItem, moderateMarketItem, downloadMarketItem, setWordbookCreationDisabled, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMarketTerm, uploadMonsterImage, uploadVocabularyWordImage } from "./db";
+import { acceptMarketTerm, addPersonalClassroomCode, addWordToWordbook, authenticateWithOAuth, authenticateWithPin, claimAnnouncementCoins, claimAnnouncementRecommendedTest, claimRecommendedWordbook, claimAvailableMonsterMissions, claimMonsterMission, completeCoinTransfer, confirmCoinTransferRecipient, createCoinTransferRequest, createAnnouncement, createCalendarEvent, createClassroom, createPinAccount, createRecommendedTest, createSiteAdminSession, createTeacherAdminSession, createWordbook, deleteAnnouncement, deleteClassroom, deletePersonalCalendarEvent, deleteRecommendedTest, deleteVocabularyWord, deleteWordbook, deleteMarketItem, deleteMarketTerm, downloadVisibleWordbookCsv, exportWordbookCsv, getClassroomMemberDetail, getOAuthClassroomApplication, grantCoinsToMember, getCoinTransferRequest, getMarketCoinWallet, listMarketCoinTransactions, getMaintenanceConfig, saveMaintenanceConfig, getSmartNotificationSettings, saveSmartNotificationSettings, saveSmartNotificationSubscription, sendSmartNotificationNow, setSmartNotificationTaskUid, getLearningDashboard, getLearningSummary, getLearningTrend, getManagementInsights, getMonsterDashboard, getPinSession, getTeacherAdminSession, getWordbookCreationPolicy, getLoginBackground, importWordbookCsv, listAnnouncementHistory, listAnnouncementRecommendedTests, listClassroomMembers, listMarketItems, listMarketModerationItems, listClassroomsForUser, listManageableAnnouncements, listManageableRecommendedTests, listManageableWordbooks, listMarketTerms, listMonsterImageSettings, listPersonalClassroomCodes, removePersonalClassroomCode, listRecommendedTestsForLearner, listReviewWords, listVisibleAnnouncements, listVisibleCalendarEvents, listVisibleWordbooks, previewWordbookCsv, uploadLoginBackground, clearLoginBackground, recordAiSelectCompletion, recordFocusSession, recordLearningResult, requestOAuthClassroomApplication, resetPinForProfile, revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession, saveMarketReview, submitMarketItem, moderateMarketItem, downloadMarketItem, setWordbookCreationDisabled, startNewMonster, updateAnnouncement, updateClassroom, updateVocabularyWord, updateWordbook, uploadMarketTerm, uploadMonsterImage, uploadVocabularyWordImage, listOAuthClassroomApplications, reviewOAuthClassroomApplication } from "./db";
 import { deleteSavedStudySet, getCalendarDashboard, listClassroomOnlineStatus, listSavedStudySets, listVocabularyWordNotes, resetRevivalTickets, saveStudySet, saveVocabularyWordNote, updateOwnDisplayName, uploadOwnAvatar, useRevivalTicket } from "./db";
 import { verifySiteAdminPassword } from "./site-admin-auth";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -16,6 +16,9 @@ function toUserMessage(error: unknown): never {
   const code = error instanceof Error ? error.message : "";
   if (code === "CLASSROOM_REQUIRED") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "教室への参加を完了してから利用してください。" });
   if (code === "CLASSROOM_NOT_FOUND") throw new TRPCError({ code: "NOT_FOUND", message: "学校コードが見つかりません。入力内容を確認してください。" });
+  if (code === "APPLICATION_REQUIRED") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "この学校への参加申請が必要です。申請を送信してください。" });
+  if (code === "APPLICATION_PENDING") throw new TRPCError({ code: "PRECONDITION_FAILED", message: "学校への参加申請を確認中です。承認されるまでお待ちください。" });
+  if (code === "APPLICATION_REJECTED") throw new TRPCError({ code: "FORBIDDEN", message: "この学校への参加申請は不許可になっています。もう一度申請できます。" });
   if (code === "LOGIN_BACKGROUND_INVALID") throw new TRPCError({ code: "BAD_REQUEST", message: "背景画像は5MB以下のPNG・JPEG・WebPを指定してください。" });
   if (code === "WORD_BOOK_FORBIDDEN") throw new TRPCError({ code: "FORBIDDEN", message: "この単語帳を編集する権限がありません。" });
   if (code === "INVALID_CLASSROOM_CODE") throw new TRPCError({ code: "BAD_REQUEST", message: "個人利用コードは英数字とハイフンの3〜32文字で入力してください。" });
@@ -213,6 +216,18 @@ export const appRouter = router({
       if (!account) throw new TRPCError({ code: "UNAUTHORIZED", message: "アカウント認証を完了してからログインしてください。" });
       try { const result = await authenticateWithOAuth(account.id, input); const options = getSessionCookieOptions(ctx.req); ctx.res.cookie("studyverse_pin", result.token, { ...options, maxAge: 30 * 24 * 60 * 60 * 1000 }); return { profile: result.profile, classroom: result.classroom, expiresAt: result.expiresAt }; } catch (error) { return toUserMessage(error); }
     }),
+    classroomApplication: router({
+      status: publicProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/) })).query(async ({ ctx, input }) => {
+        const account = await sdk.authenticateRequest(ctx.req).catch(() => null);
+        if (!account) return null;
+        try { return await getOAuthClassroomApplication(account.id, input.classroomCode); } catch (error) { return toUserMessage(error); }
+      }),
+      request: publicProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/) })).mutation(async ({ ctx, input }) => {
+        const account = await sdk.authenticateRequest(ctx.req).catch(() => null);
+        if (!account) throw new TRPCError({ code: "UNAUTHORIZED", message: "アカウント認証を完了してから申請してください。" });
+        try { return await requestOAuthClassroomApplication(account.id, input.classroomCode); } catch (error) { return toUserMessage(error); }
+      }),
+    }),
     pinMe: publicProcedure.query(async ({ ctx }) => {
       const token = getRequestCookie(ctx.req.headers.cookie, "studyverse_pin");
       if (!token) return null;
@@ -336,6 +351,10 @@ export const appRouter = router({
     }),
   }),
   classroom: router({
+    applications: router({
+      list: protectedProcedure.query(async ({ ctx }) => { try { return await listOAuthClassroomApplications(ctx.user.id); } catch (error) { return toUserMessage(error); } }),
+      review: protectedProcedure.input(z.object({ applicationId: z.number().int().positive(), decision: z.enum(["approved", "rejected"]) })).mutation(async ({ ctx, input }) => { try { return await reviewOAuthClassroomApplication(ctx.user.id, input.applicationId, input.decision); } catch (error) { return toUserMessage(error); } }),
+    }),
     rooms: router({
       list: protectedProcedure.input(z.object({ query: z.string().trim().max(120).optional() }).optional()).query(async ({ ctx, input }) => {
         try { return await listClassroomsForUser(ctx.user.id, input?.query); } catch (error) { return toUserMessage(error); }
