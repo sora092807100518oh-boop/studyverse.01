@@ -5,8 +5,7 @@ export type MissionReward = { missionKey: string; periodKey: string; points: num
 const TOKYO = "Asia/Tokyo";
 export const DAILY_MISSIONS = [
   { key: "login", label: "ログインする" },
-  { key: "ai-english", label: "AIセレクト10（英語）を解く" },
-  { key: "ai-kanji", label: "AIセレクト10（漢字）を解く" },
+  { key: "ai-select", label: "AIセレクト10を解く" },
   { key: "test", label: "テストモードでテストを受ける" },
   { key: "practice", label: "単語カードで練習をする" },
 ] as const;
@@ -65,8 +64,8 @@ export function calculateMonsterStage(focusSeconds: number, missionPoints: numbe
 export function buildMissionState(input: { startedAt: Date; records: MonsterStudyRecord[]; activities: MonsterActivity[]; now?: Date }) {
   const now = input.now ?? new Date(); const today = tokyoDay(now); const month = tokyoMonth(now); const firstDay = tokyoDay(input.startedAt);
   const flagsByDay = new Map<string, DailyFlags>();
-  const ensure = (day: string) => { const current = flagsByDay.get(day) ?? { login: false, "ai-english": false, "ai-kanji": false, test: false, practice: false }; flagsByDay.set(day, current); return current; };
-  for (const activity of input.activities) { const day = tokyoDay(activity.createdAt); if (day < firstDay) continue; const flags = ensure(day); if (activity.action === "login.success") flags.login = true; if (activity.action === "ai_select.completed" && activity.details === "english") flags["ai-english"] = true; if (activity.action === "ai_select.completed" && activity.details === "kanji") flags["ai-kanji"] = true; }
+  const ensure = (day: string) => { const current = flagsByDay.get(day) ?? { login: false, "ai-select": false, test: false, practice: false }; flagsByDay.set(day, current); return current; };
+  for (const activity of input.activities) { const day = tokyoDay(activity.createdAt); if (day < firstDay) continue; const flags = ensure(day); if (activity.action === "login.success") flags.login = true; if (activity.action === "ai_select.completed") flags["ai-select"] = true; }
   for (const record of input.records) { const day = tokyoDay(record.answeredAt); if (day < firstDay) continue; const flags = ensure(day); if (record.mode === "test") flags.test = true; if (record.mode === "practice") flags.practice = true; }
   const dailyRows: Array<{ day: string; flags: DailyFlags; complete: boolean }> = [];
   for (let day = firstDay; day <= today; day = addTokyoDays(day, 1)) { const flags = ensure(day); dailyRows.push({ day, flags, complete: DAILY_MISSIONS.every(mission => flags[mission.key]) }); }

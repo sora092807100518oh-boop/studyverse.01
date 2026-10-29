@@ -258,6 +258,7 @@ export const marketItems = mysqlTable("marketItems", {
   name: varchar("name", { length: 160 }).notNull(),
   imageUrl: varchar("imageUrl", { length: 2048 }).notNull(),
   price: int("price").default(0).notNull(),
+  salePrice: int("salePrice"),
   freeFrom: timestamp("freeFrom"),
   freeUntil: timestamp("freeUntil"),
   isOfficial: boolean("isOfficial").default(false).notNull(),

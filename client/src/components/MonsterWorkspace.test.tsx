@@ -13,7 +13,7 @@ const dashboard: any = {
   allThreeCompleted: false,
   nextCycleEggNumber: null,
   mission: {
-    daily: { periodKey: "2026-08-27", progress: 0, complete: false, missions: [{ key: "login", label: "ログインする", complete: false }, { key: "ai-english", label: "AIセレクト10（英語）を解く", complete: false }, { key: "ai-kanji", label: "AIセレクト10（漢字）を解く", complete: false }, { key: "test", label: "テストモードでテストを受ける", complete: false }, { key: "practice", label: "単語カードで練習をする", complete: false }] },
+    daily: { periodKey: "2026-08-27", progress: 0, complete: false, missions: [{ key: "login", label: "ログインする", complete: false }, { key: "ai-select", label: "AIセレクト10を解く", complete: false }, { key: "test", label: "テストモードでテストを受ける", complete: false }, { key: "practice", label: "単語カードで練習をする", complete: false }] },
     monthly: { periodKey: "2026-08", progress: 0, complete: false, missions: [{ key: "login-10", label: "月に10日ログインする", value: 0, threshold: 10, complete: false }] },
     normal: { missions: [{ key: "first-login", label: "初めてログインする", complete: true, coins: 200 }], rewards: [{ missionKey: "normal.first-login", periodKey: "lifetime", points: 0, coins: 200, label: "初めてログインする" }] },
     claimable: [],
@@ -44,7 +44,7 @@ const resetDashboard = () => {
   dashboard.eggs = [{ id: 1, eggNumber: "1", consumedAt: new Date(), acquiredAt: new Date(), source: "starter" }];
   dashboard.history = [{ id: 1, eggNumber: "1", active: true, progression: { stage: 1, stageProgress: 0, minutesToNext: 1200 } }];
   dashboard.images = []; dashboard.allThreeCompleted = false; dashboard.nextCycleEggNumber = null;
-  dashboard.mission.daily = { periodKey: "2026-08-27", progress: 0, complete: false, missions: [{ key: "login", label: "ログインする", complete: false }, { key: "ai-english", label: "AIセレクト10（英語）を解く", complete: false }, { key: "ai-kanji", label: "AIセレクト10（漢字）を解く", complete: false }, { key: "test", label: "テストモードでテストを受ける", complete: false }, { key: "practice", label: "単語カードで練習をする", complete: false }] };
+  dashboard.mission.daily = { periodKey: "2026-08-27", progress: 0, complete: false, missions: [{ key: "login", label: "ログインする", complete: false }, { key: "ai-select", label: "AIセレクト10を解く", complete: false }, { key: "test", label: "テストモードでテストを受ける", complete: false }, { key: "practice", label: "単語カードで練習をする", complete: false }] };
   dashboard.mission.monthly = { periodKey: "2026-08", progress: 0, complete: false, missions: [{ key: "login-10", label: "月に10日ログインする", value: 0, threshold: 10, complete: false }] };
   dashboard.mission.normal = { missions: [{ key: "first-login", label: "初めてログインする", complete: true, coins: 200 }], rewards: [{ missionKey: "normal.first-login", periodKey: "lifetime", points: 0, coins: 200, label: "初めてログインする" }] };
   dashboard.mission.claimable = []; dashboard.mission.claimedKeys = [];

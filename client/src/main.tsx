@@ -6,6 +6,14 @@ import superjson from "superjson";
 import App from "./App";
 import "./index.css";
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    void navigator.serviceWorker.register("/sw.js").catch(() => {
+      // Offline support is an enhancement; the online app remains available.
+    });
+  });
+}
+
 const queryClient = new QueryClient();
 
 const trpcClient = trpc.createClient({

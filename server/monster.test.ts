@@ -18,7 +18,7 @@ describe("モンスターミッションの進捗", () => {
     expect(tokyoDay(today)).toBe("2026-08-21");
   });
 
-  it("5種類のデイリーを全達成すると各1ポイントと追加5ポイントを受取可能にする", () => {
+  it("4種類のデイリーを全達成すると各1ポイントと追加5ポイントを受取可能にする", () => {
     const state = buildMissionState({
       startedAt: new Date("2026-08-21T00:01:00+09:00"),
       activities: [
@@ -32,9 +32,9 @@ describe("モンスターミッションの進捗", () => {
       ],
       now: today,
     });
-    expect(state.daily).toMatchObject({ progress: 5, complete: true });
-    expect(state.daily.rewards).toHaveLength(6);
-    expect(state.daily.rewards.reduce((sum, reward) => sum + reward.points, 0)).toBe(10);
+    expect(state.daily).toMatchObject({ progress: 4, complete: true });
+    expect(state.daily.rewards).toHaveLength(5);
+    expect(state.daily.rewards.reduce((sum, reward) => sum + reward.points, 0)).toBe(9);
     expect(state.daily.rewards.some(reward => reward.missionKey === "daily.bonus" && reward.points === 5)).toBe(true);
   });
 

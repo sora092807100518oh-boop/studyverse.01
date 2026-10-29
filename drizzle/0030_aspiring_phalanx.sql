@@ -1,0 +1,1 @@
+ALTER TABLE `marketItems` ADD `salePrice` int;

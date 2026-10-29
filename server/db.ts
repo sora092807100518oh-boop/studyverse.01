@@ -1584,7 +1584,9 @@ async function decorateMarketItem(userId: number, item: typeof marketItems.$infe
   const ownReview = reviews.find(review => review.userId === userId)?.stars ?? null;
   const now = new Date();
   const isFreeNow = Boolean(item.freeFrom && item.freeUntil && now >= item.freeFrom && now <= item.freeUntil);
-  return { ...item, sourceTitle: source[0]?.title ?? item.name, subject: source[0]?.subject ?? "english", reviewCount: reviews.length, averageStars, downloadCount: Number(downloadTotal[0]?.count ?? 0), downloaded: Boolean(download[0]), ownReview, isOwner: item.ownerUserId === userId, isFreeNow };
+  const isSaleNow = item.salePrice !== null && item.salePrice >= 0 && item.salePrice < item.price;
+  const currentPrice = isFreeNow ? 0 : isSaleNow ? item.salePrice : item.price;
+  return { ...item, sourceTitle: source[0]?.title ?? item.name, subject: source[0]?.subject ?? "english", reviewCount: reviews.length, averageStars, downloadCount: Number(downloadTotal[0]?.count ?? 0), downloaded: Boolean(download[0]), ownReview, isOwner: item.ownerUserId === userId, isFreeNow, isSaleNow, currentPrice };
 }
 
 export async function listMarketItems(userId: number) {
@@ -1639,12 +1641,13 @@ export async function moderateMarketItem(userId: number, input: { marketItemId: 
   return { success: true } as const;
 }
 
-export async function updateMarketItemSettings(userId: number, input: { marketItemId: number; isOfficial: boolean; freeFrom: Date | null; freeUntil: Date | null }) {
+export async function updateMarketItemSettings(userId: number, input: { marketItemId: number; isOfficial: boolean; freeFrom: Date | null; freeUntil: Date | null; salePrice: number | null }) {
   const db = await assertSiteAdmin(userId);
   if ((input.freeFrom && !input.freeUntil) || (!input.freeFrom && input.freeUntil) || (input.freeFrom && input.freeUntil && input.freeUntil <= input.freeFrom)) throw new Error("MARKET_FREE_PERIOD_INVALID");
-  const item = await db.select({ id: marketItems.id }).from(marketItems).where(eq(marketItems.id, input.marketItemId)).limit(1);
+  const item = await db.select({ id: marketItems.id, price: marketItems.price }).from(marketItems).where(eq(marketItems.id, input.marketItemId)).limit(1);
   if (!item[0]) throw new Error("MARKET_ITEM_NOT_FOUND");
-  await db.update(marketItems).set({ isOfficial: input.isOfficial, freeFrom: input.freeFrom, freeUntil: input.freeUntil }).where(eq(marketItems.id, input.marketItemId));
+  if (input.salePrice !== null && (input.salePrice < 0 || input.salePrice >= item[0].price)) throw new Error("MARKET_SALE_PRICE_INVALID");
+  await db.update(marketItems).set({ isOfficial: input.isOfficial, freeFrom: input.freeFrom, freeUntil: input.freeUntil, salePrice: input.salePrice }).where(eq(marketItems.id, input.marketItemId));
   return { success: true } as const;
 }
 export async function deleteMarketItem(userId: number, marketItemId: number) {
@@ -1677,7 +1680,9 @@ export async function downloadMarketItem(userId: number, marketItemId: number) {
     if (!source) throw new Error("MARKET_SOURCE_UNAVAILABLE");
     const now = new Date();
     const isFreeNow = Boolean(item.freeFrom && item.freeUntil && now >= item.freeFrom && now <= item.freeUntil);
-    const buyerPrice = isFreeNow ? 0 : item.price;
+    const listedPrice = item.price ?? 0;
+    const isSaleNow = item.salePrice !== null && item.salePrice >= 0 && item.salePrice < listedPrice;
+    const buyerPrice = isFreeNow ? 0 : isSaleNow ? (item.salePrice ?? listedPrice) : listedPrice;
     if (buyerPrice > 0) {
       const debit = await tx.update(users).set({ marketCoins: sql`${users.marketCoins} - ${buyerPrice}` }).where(and(eq(users.id, userId), gte(users.marketCoins, buyerPrice)));
       const affectedRows = Array.isArray(debit) ? Number((debit[0] as { affectedRows?: number } | undefined)?.affectedRows ?? 0) : 0;

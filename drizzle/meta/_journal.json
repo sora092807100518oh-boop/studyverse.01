@@ -211,6 +211,13 @@
       "when": 1793237652945,
       "tag": "0029_amusing_shinko_yamashiro",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "5",
+      "when": 1793251087333,
+      "tag": "0030_aspiring_phalanx",
+      "breakpoints": true
     }
   ]
 }

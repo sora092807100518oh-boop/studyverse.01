@@ -16,6 +16,20 @@ type Pool = "normal" | "mistakes";
 type PracticeRating = "known" | "review" | "instant" | "slow";
 type SwipeAxis = "right" | "left" | "up" | "down";
 
+function offlineBooksKey(subject: "english" | "kanji") {
+  return `studyverse-offline-wordbooks:${subject}`;
+}
+
+function readOfflineBooks(subject: "english" | "kanji") {
+  try {
+    const raw = window.localStorage.getItem(offlineBooksKey(subject));
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const ratingMeta: Record<PracticeRating, { label: string; shortLabel: string; symbol: string; description: string; tone: string }> = {
   known: { label: "GREAT / PERFECT", shortLabel: "右・GREAT / PERFECT", symbol: "○", description: "普通にわかった単語", tone: "text-cyan-600" },
   review: { label: "MISS / BAD", shortLabel: "左・MISS / BAD", symbol: "×", description: "わからなかった単語", tone: "text-violet-600" },
@@ -67,7 +81,7 @@ export function CardsWorkspace({ books, initialReview = false, onReviewOpened, r
   const [swipeExitCard, setSwipeExitCard] = useState<{ word: Word; showAnswer: boolean; rating: PracticeRating; axis: SwipeAxis; originX: number; originY: number } | null>(null); const [swipePreview, setSwipePreview] = useState<{ rating: PracticeRating; axis: SwipeAxis } | null>(null); const [expandedRating, setExpandedRating] = useState<PracticeRating | null>(null); const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null); const [continueFromPrevious, setContinueFromPrevious] = useState(false); const [hasStoredPractice, setHasStoredPractice] = useState(false); const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [noteEditorOpen, setNoteEditorOpen] = useState(false); const [noteDraft, setNoteDraft] = useState(""); const [detailOpen, setDetailOpen] = useState(false);
   const advanceLock = useRef(false); const persistenceQueue = useRef(Promise.resolve()); const pointerStart = useRef<{ x: number; y: number } | null>(null); const didDrag = useRef(false); const exitTimer = useRef<number | null>(null); const cardX = useMotionValue(0); const cardY = useMotionValue(0); const cardRotate = useTransform(cardX, [-420, 0, 420], [-12, 0, 12]);
-  const utils = trpc.useUtils(); const remoteBooks = trpc.wordbooks.list.useQuery({ subject: subject === "英単語" ? "english" : "kanji" }, { retry: false }); const sets = trpc.studySets.list.useQuery(undefined, { retry: false }); const createSet = trpc.studySets.create.useMutation(); const removeSet = trpc.studySets.delete.useMutation(); const assignments = trpc.classroom.recommendedTests.list.useQuery(undefined, { retry: false }); const claimWordbook = trpc.classroom.recommendedTests.claimWordbook.useMutation(); const review = trpc.learning.review.useQuery(undefined, { retry: false }); const dashboard = trpc.learning.dashboard.useQuery(undefined, { retry: false }); const notes = trpc.wordNotes.list.useQuery(undefined, { retry: false }); const saveNote = trpc.wordNotes.save.useMutation(); const record = trpc.learning.recordAnswer.useMutation();
+  const utils = trpc.useUtils(); const remoteSubject = subject === "英単語" ? "english" : "kanji"; const remoteBooks = trpc.wordbooks.list.useQuery({ subject: remoteSubject }, { retry: false, initialData: readOfflineBooks(remoteSubject) }); const sets = trpc.studySets.list.useQuery(undefined, { retry: false }); const createSet = trpc.studySets.create.useMutation(); const removeSet = trpc.studySets.delete.useMutation(); const assignments = trpc.classroom.recommendedTests.list.useQuery(undefined, { retry: false }); const claimWordbook = trpc.classroom.recommendedTests.claimWordbook.useMutation(); const review = trpc.learning.review.useQuery(undefined, { retry: false }); const dashboard = trpc.learning.dashboard.useQuery(undefined, { retry: false }); const notes = trpc.wordNotes.list.useQuery(undefined, { retry: false }); const saveNote = trpc.wordNotes.save.useMutation(); const record = trpc.learning.recordAnswer.useMutation();
   const availableBooks = useMemo(() => remoteBooks.data ? remoteBooks.data.map(book => ({ id: String(book.id), name: book.title, words: book.words })) : books[subject], [remoteBooks.data, books, subject]);
   const selectedBook = availableBooks.find(book => book.id === bookId); const rangeWords = selectedBook?.words.slice(Math.max(0, Number(start) - 1), Math.max(0, Number(end || selectedBook.words.length))) ?? [];
   const active = words[index]; const showAnswer = direction === "question" ? flipped : !flipped; const displayedText = active ? (showAnswer ? active.front : active.back) : ""; const expectedAnswer = active ? (showAnswer ? active.back : active.front) : ""; const mistakeCounts = useMemo(() => new Map((dashboard.data?.mistakeCounts ?? []).map(item => [item.wordId, item.mistakeCount])), [dashboard.data?.mistakeCounts]); const practiceRatings = useMemo(() => new Map((dashboard.data?.practiceRatings ?? []).map(item => [item.wordId, item.rating as PracticeRating])), [dashboard.data?.practiceRatings]); const noteByWordId = useMemo(() => new Map((notes.data ?? []).map(item => [item.wordId, item.note])), [notes.data]); const activeNote = active?.id ? noteByWordId.get(active.id) ?? "" : ""; const ratingWords = useMemo(() => { const groups = {} as Record<PracticeRating, Word[]>; (Object.keys(ratingMeta) as PracticeRating[]).forEach(rating => { groups[rating] = settingsWords.filter(word => word.id !== undefined && practiceRatings.get(word.id) === rating); }); return groups; }, [practiceRatings, settingsWords]);
@@ -75,6 +89,7 @@ export function CardsWorkspace({ books, initialReview = false, onReviewOpened, r
 
   const practiceStorageKey = resumeStorageKey ?? "studyverse-practice-continue";
   const [recordingEnabled, setRecordingEnabled] = useState(true); const [settingsShouldRecord, setSettingsShouldRecord] = useState(true);
+  useEffect(() => { if (!remoteBooks.data?.length) return; try { window.localStorage.setItem(offlineBooksKey(remoteSubject), JSON.stringify(remoteBooks.data)); } catch { /* device storage is optional */ } }, [remoteBooks.data, remoteSubject]);
   const voiceStorageKey = `${practiceStorageKey}:voice`;
   const readStoredPractice = (): PracticeResumeDraft | null => { try { const raw = window.localStorage.getItem(practiceStorageKey); if (!raw) return null; const draft = JSON.parse(raw) as PracticeResumeDraft; if (draft.version !== 1 || !Array.isArray(draft.words) || !draft.words.length || !Number.isInteger(draft.index) || draft.index < 0 || draft.index >= draft.words.length) throw new Error("invalid practice draft"); return { ...draft, direction: draft.direction ?? "question", training: draft.training ?? false }; } catch { window.localStorage.removeItem(practiceStorageKey); return null; } };
   const storePractice = (draft: PracticeResumeDraft) => { try { window.localStorage.setItem(practiceStorageKey, JSON.stringify(draft)); setHasStoredPractice(true); } catch { toast.error("途中の練習を保存できませんでした。"); } };
