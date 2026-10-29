@@ -3,13 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const hooks = vi.hoisted(() => ({ invalidate: vi.fn(), submit: vi.fn(), download: vi.fn(), review: vi.fn() }));
-const marketItems = [{ id: 1, name: "旅行英語スターター", imageUrl: "/market.png", status: "approved", subject: "english", price: 50, averageStars: 4.5, reviewCount: 2, downloaded: false, ownReview: null, isOwner: false }];
+const marketItems = [{ id: 1, name: "旅行英語スターター", imageUrl: "/market.png", status: "approved", subject: "english", price: 50, averageStars: 4.5, reviewCount: 2, downloadCount: 12, downloaded: false, ownReview: null, isOwner: false, isOfficial: true, isFreeNow: false }];
 
 vi.mock("@/lib/trpc", () => ({
   trpc: {
-    useUtils: () => ({ market: { list: { invalidate: hooks.invalidate }, wallet: { invalidate: hooks.invalidate }, manage: { invalidate: hooks.invalidate }, terms: { list: { invalidate: hooks.invalidate } } }, wordbooks: { list: { invalidate: hooks.invalidate } } }),
+    useUtils: () => ({ market: { list: { invalidate: hooks.invalidate }, ranking: { invalidate: hooks.invalidate }, wallet: { invalidate: hooks.invalidate }, manage: { invalidate: hooks.invalidate }, terms: { list: { invalidate: hooks.invalidate } } }, wordbooks: { list: { invalidate: hooks.invalidate } } }),
     market: {
       list: { useQuery: () => ({ data: marketItems, isLoading: false, isError: false }) },
+      ranking: { useQuery: () => ({ data: marketItems, isLoading: false, isError: false }) },
       wallet: { useQuery: () => ({ data: { balance: 200 }, isLoading: false }) },
       submit: { useMutation: () => ({ mutateAsync: hooks.submit, isPending: false }) },
       download: { useMutation: () => ({ mutateAsync: hooks.download, isPending: false }) },

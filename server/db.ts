@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { drizzle } from "drizzle-orm/mysql2";
 import webpush from "web-push";
@@ -1574,14 +1574,17 @@ export async function acceptMarketTerm(userId: number, termId: number) {
 }
 
 async function decorateMarketItem(userId: number, item: typeof marketItems.$inferSelect, db: NonNullable<Awaited<ReturnType<typeof getDb>>>) {
-  const [source, reviews, download] = await Promise.all([
+  const [source, reviews, download, downloadTotal] = await Promise.all([
     db.select({ title: wordbooks.title, subject: wordbooks.subject }).from(wordbooks).where(eq(wordbooks.id, item.wordbookId)).limit(1),
     db.select({ stars: marketReviews.stars, userId: marketReviews.userId }).from(marketReviews).where(eq(marketReviews.marketItemId, item.id)),
     db.select({ id: marketDownloads.id }).from(marketDownloads).where(and(eq(marketDownloads.marketItemId, item.id), eq(marketDownloads.userId, userId))).limit(1),
+    db.select({ count: count() }).from(marketDownloads).where(eq(marketDownloads.marketItemId, item.id)),
   ]);
   const averageStars = reviews.length ? Math.round((reviews.reduce((sum, review) => sum + review.stars, 0) / reviews.length) * 10) / 10 : 0;
   const ownReview = reviews.find(review => review.userId === userId)?.stars ?? null;
-  return { ...item, sourceTitle: source[0]?.title ?? item.name, subject: source[0]?.subject ?? "english", reviewCount: reviews.length, averageStars, downloaded: Boolean(download[0]), ownReview, isOwner: item.ownerUserId === userId };
+  const now = new Date();
+  const isFreeNow = Boolean(item.freeFrom && item.freeUntil && now >= item.freeFrom && now <= item.freeUntil);
+  return { ...item, sourceTitle: source[0]?.title ?? item.name, subject: source[0]?.subject ?? "english", reviewCount: reviews.length, averageStars, downloadCount: Number(downloadTotal[0]?.count ?? 0), downloaded: Boolean(download[0]), ownReview, isOwner: item.ownerUserId === userId, isFreeNow };
 }
 
 export async function listMarketItems(userId: number) {
@@ -1591,6 +1594,12 @@ export async function listMarketItems(userId: number) {
   return Promise.all(rows.map(item => decorateMarketItem(userId, item, db)));
 }
 
+export async function listMarketRankingItems(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.select({ item: marketItems, downloadCount: count(marketDownloads.id) }).from(marketItems).leftJoin(marketDownloads, eq(marketDownloads.marketItemId, marketItems.id)).where(eq(marketItems.status, "approved")).groupBy(marketItems.id).orderBy(desc(count(marketDownloads.id)), desc(marketItems.createdAt)).limit(3);
+  return Promise.all(rows.map(async row => ({ ...(await decorateMarketItem(userId, row.item, db)), downloadCount: Number(row.downloadCount) })));
+}
 export async function submitMarketItem(userId: number, input: { wordbookId: number; name: string; price: number; dataUrl: string }) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
@@ -1630,6 +1639,14 @@ export async function moderateMarketItem(userId: number, input: { marketItemId: 
   return { success: true } as const;
 }
 
+export async function updateMarketItemSettings(userId: number, input: { marketItemId: number; isOfficial: boolean; freeFrom: Date | null; freeUntil: Date | null }) {
+  const db = await assertSiteAdmin(userId);
+  if ((input.freeFrom && !input.freeUntil) || (!input.freeFrom && input.freeUntil) || (input.freeFrom && input.freeUntil && input.freeUntil <= input.freeFrom)) throw new Error("MARKET_FREE_PERIOD_INVALID");
+  const item = await db.select({ id: marketItems.id }).from(marketItems).where(eq(marketItems.id, input.marketItemId)).limit(1);
+  if (!item[0]) throw new Error("MARKET_ITEM_NOT_FOUND");
+  await db.update(marketItems).set({ isOfficial: input.isOfficial, freeFrom: input.freeFrom, freeUntil: input.freeUntil }).where(eq(marketItems.id, input.marketItemId));
+  return { success: true } as const;
+}
 export async function deleteMarketItem(userId: number, marketItemId: number) {
   const db = await assertSiteAdmin(userId);
   const item = await db.select().from(marketItems).where(eq(marketItems.id, marketItemId)).limit(1);
@@ -1648,23 +1665,28 @@ export async function downloadMarketItem(userId: number, marketItemId: number) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
   const existing = (await db.select().from(marketDownloads).where(and(eq(marketDownloads.marketItemId, marketItemId), eq(marketDownloads.userId, userId))).limit(1))[0];
-  if (existing) return { downloadedWordbookId: existing.downloadedWordbookId, alreadyDownloaded: true, pricePaid: existing.pricePaid, balance: (await getMarketCoinWallet(userId)).balance };
+  if (existing) return { downloadedWordbookId: existing.downloadedWordbookId, alreadyDownloaded: true, pricePaid: existing.pricePaid, sellerReward: 0, balance: (await getMarketCoinWallet(userId)).balance };
   const profile = await getProfile(userId);
   const result = await db.transaction(async tx => {
     const alreadyDownloaded = (await tx.select().from(marketDownloads).where(and(eq(marketDownloads.marketItemId, marketItemId), eq(marketDownloads.userId, userId))).limit(1))[0];
-    if (alreadyDownloaded) return { downloadedWordbookId: alreadyDownloaded.downloadedWordbookId, alreadyDownloaded: true, pricePaid: alreadyDownloaded.pricePaid };
+    if (alreadyDownloaded) return { downloadedWordbookId: alreadyDownloaded.downloadedWordbookId, alreadyDownloaded: true, pricePaid: alreadyDownloaded.pricePaid, sellerReward: 0 };
     const item = (await tx.select().from(marketItems).where(and(eq(marketItems.id, marketItemId), eq(marketItems.status, "approved"))).limit(1))[0];
     if (!item) throw new Error("MARKET_ITEM_NOT_FOUND");
     if (item.ownerUserId === userId) throw new Error("MARKET_SELF_PURCHASE_FORBIDDEN");
     const source = (await tx.select().from(wordbooks).where(and(eq(wordbooks.id, item.wordbookId), eq(wordbooks.ownerUserId, item.ownerUserId), eq(wordbooks.visibility, "private"))).limit(1))[0];
     if (!source) throw new Error("MARKET_SOURCE_UNAVAILABLE");
-    if (item.price > 0) {
-      const debit = await tx.update(users).set({ marketCoins: sql`${users.marketCoins} - ${item.price}` }).where(and(eq(users.id, userId), gte(users.marketCoins, item.price)));
+    const now = new Date();
+    const isFreeNow = Boolean(item.freeFrom && item.freeUntil && now >= item.freeFrom && now <= item.freeUntil);
+    const buyerPrice = isFreeNow ? 0 : item.price;
+    if (buyerPrice > 0) {
+      const debit = await tx.update(users).set({ marketCoins: sql`${users.marketCoins} - ${buyerPrice}` }).where(and(eq(users.id, userId), gte(users.marketCoins, buyerPrice)));
       const affectedRows = Array.isArray(debit) ? Number((debit[0] as { affectedRows?: number } | undefined)?.affectedRows ?? 0) : 0;
       if (affectedRows !== 1) throw new Error("MARKET_INSUFFICIENT_COINS");
+    }
+    if (item.price > 0) {
       await tx.update(users).set({ marketCoins: sql`${users.marketCoins} + ${item.price}` }).where(eq(users.id, item.ownerUserId));
       await tx.insert(marketCoinTransactions).values([
-        { userId, counterpartyUserId: item.ownerUserId, marketItemId: item.id, amount: -item.price, type: "market_purchase", referenceKey: `market:${item.id}:${userId}:purchase` },
+        ...(buyerPrice > 0 ? [{ userId, counterpartyUserId: item.ownerUserId, marketItemId: item.id, amount: -buyerPrice, type: "market_purchase" as const, referenceKey: `market:${item.id}:${userId}:purchase` }] : []),
         { userId: item.ownerUserId, counterpartyUserId: userId, marketItemId: item.id, amount: item.price, type: "market_sale", referenceKey: `market:${item.id}:${userId}:sale` },
       ]);
     }
@@ -1673,8 +1695,8 @@ export async function downloadMarketItem(userId: number, marketItemId: number) {
     if (!clonedWordbookId) throw new Error("MARKET_ITEM_NOT_FOUND");
     const words = await tx.select({ front: vocabularyWords.front, back: vocabularyWords.back, reading: vocabularyWords.reading, imageUrl: vocabularyWords.imageUrl, exampleSentence: vocabularyWords.exampleSentence, exampleTranslation: vocabularyWords.exampleTranslation }).from(vocabularyWords).where(eq(vocabularyWords.wordbookId, source.id)).orderBy(vocabularyWords.id);
     if (words.length) await tx.insert(vocabularyWords).values(words.map(word => ({ ...word, wordbookId: clonedWordbookId, source: "admin" as const })));
-    await tx.insert(marketDownloads).values({ marketItemId, userId, sellerUserId: item.ownerUserId, pricePaid: item.price, downloadedWordbookId: clonedWordbookId });
-    return { downloadedWordbookId: clonedWordbookId, alreadyDownloaded: false, pricePaid: item.price, itemName: item.name };
+    await tx.insert(marketDownloads).values({ marketItemId, userId, sellerUserId: item.ownerUserId, pricePaid: buyerPrice, downloadedWordbookId: clonedWordbookId });
+    return { downloadedWordbookId: clonedWordbookId, alreadyDownloaded: false, pricePaid: buyerPrice, sellerReward: item.price, itemName: item.name };
   });
   const balance = (await getMarketCoinWallet(userId)).balance;
   if (!result.alreadyDownloaded && "itemName" in result) await writeActivity({ actorUserId: userId, classroomId: profile?.profile.classroomId, category: "classroom", action: "market.downloaded", details: result.itemName });
