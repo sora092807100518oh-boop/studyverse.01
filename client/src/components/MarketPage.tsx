@@ -1,4 +1,4 @@
-import { BadgeCheck, Coins, Download, ImagePlus, Plus, Star, Trophy, Upload, X } from "lucide-react";
+import { BadgeCheck, Coins, Crown, Download, ImagePlus, Plus, Star, Trophy, Upload, X } from "lucide-react";
 import React, { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
@@ -43,8 +43,9 @@ function PriceLabel({ price, isFreeNow = false, isSaleNow = false, currentPrice 
 }
 
 function MarketCard({ item, rank, onOpen }: { item: any; rank?: number; onOpen: () => void }) {
+  const rankStyle = rank === 1 ? "border-[#e2b94f] bg-[#fff3bd] text-[#7d5100]" : rank === 2 ? "border-[#b9c4d0] bg-[#eef2f6] text-[#536273]" : "border-[#d6a276] bg-[#f8e4d3] text-[#874a27]";
   return <button type="button" onClick={onOpen} className="glass-card relative overflow-hidden rounded-[22px] text-left transition hover:-translate-y-0.5 hover:border-cyan-200/30">
-    {rank && <span className="absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full border border-[#e8c98f] bg-[#fff4dd] px-2.5 py-1 text-[10px] font-extrabold text-[#8a5200] shadow-sm"><Trophy className="h-3 w-3" />{rank}位</span>}
+    {rank && <span className={`absolute left-2 top-2 z-10 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-extrabold shadow-sm ${rankStyle}`}><Crown className="h-3.5 w-3.5" />{rank}位</span>}
     <div className="aspect-square bg-slate-950/30"><img src={item.imageUrl} alt={item.name} className="h-full w-full object-cover" /></div>
     <div className="p-3"><div className="flex items-start gap-1"><p className="min-w-0 flex-1 truncate text-sm font-bold">{item.name}</p>{item.isOfficial && <BadgeCheck aria-label="公式認定教材" className="h-4 w-4 shrink-0 text-cyan-300" />}</div><div className="mt-2 flex items-center justify-between gap-1"><PriceLabel price={item.price} isFreeNow={item.isFreeNow} isSaleNow={item.isSaleNow} currentPrice={item.currentPrice} /><span className="inline-flex items-center gap-1 text-[10px] text-slate-400"><Download className="h-3.5 w-3.5" />{item.downloadCount ?? 0}</span></div></div>
   </button>;
