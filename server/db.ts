@@ -1599,8 +1599,9 @@ export async function listMarketItems(userId: number) {
 export async function listMarketRankingItems(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select({ item: marketItems, downloadCount: count(marketDownloads.id) }).from(marketItems).leftJoin(marketDownloads, eq(marketDownloads.marketItemId, marketItems.id)).where(eq(marketItems.status, "approved")).groupBy(marketItems.id).orderBy(desc(count(marketDownloads.id)), desc(marketItems.createdAt)).limit(3);
-  return Promise.all(rows.map(async row => ({ ...(await decorateMarketItem(userId, row.item, db)), downloadCount: Number(row.downloadCount) })));
+  const rows = await db.select({ item: marketItems, downloadCount: count(marketDownloads.id) }).from(marketItems).leftJoin(marketDownloads, eq(marketDownloads.marketItemId, marketItems.id)).where(eq(marketItems.status, "approved")).groupBy(marketItems.id).orderBy(desc(count(marketDownloads.id)), desc(marketItems.createdAt));
+  const ranked = rows.filter(row => Number(row.downloadCount) > 0).slice(0, 3);
+  return Promise.all(ranked.map(async row => ({ ...(await decorateMarketItem(userId, row.item, db)), downloadCount: Number(row.downloadCount) })));
 }
 export async function submitMarketItem(userId: number, input: { wordbookId: number; name: string; price: number; dataUrl: string }) {
   const db = await getDb();
