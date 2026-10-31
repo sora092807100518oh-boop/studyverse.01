@@ -411,3 +411,25 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 .dark .library-grid .library-book-card { background: linear-gradient(145deg, rgba(31,39,69,.96), rgba(20,27,51,.93)); }
 .dark .library-grid .favorite-button { background: rgba(16,22,43,.78); }
 @media (max-width: 380px) { .library-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; } .library-grid .library-item-main { min-height: 150px; padding: .7rem; } }
+
+/* Per-book and per-learning-set cover customization. */
+.cover-style-trigger { position: absolute; right: .5rem; bottom: .5rem; z-index: 4; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; background: rgba(255,255,255,.82); color: #7764bd; box-shadow: 0 4px 10px rgba(35,45,75,.12); }
+.cover-style-trigger:active { transform: scale(.94); }
+.cover-style-popover { position: absolute; right: .45rem; bottom: 2.65rem; z-index: 60; width: min(240px, calc(100vw - 2rem)); border: 1px solid rgba(115,105,170,.18); border-radius: 17px; padding: .75rem; background: rgba(255,255,255,.98); color: #3a4660; box-shadow: 0 16px 34px rgba(40,45,75,.2); }
+.cover-style-popover b { font-size: 11px; }
+.cover-style-popover > div:first-child button { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 8px; color: #8490a4; }
+.cover-image-input { display: flex; align-items: center; gap: .35rem; margin-top: .65rem; border-radius: 10px; padding: .55rem .6rem; background: #f1eff8; color: #6e5da9; font-size: 10px; font-weight: 800; cursor: pointer; }
+.cover-image-input input { display: none; }
+.cover-color-row { display: flex; align-items: center; gap: .35rem; margin-top: .6rem; color: #8b94a5; }
+.cover-color { width: 20px; height: 20px; border: 2px solid transparent; border-radius: 50%; }
+.cover-color.is-active { border-color: #fff; outline: 2px solid #7664c6; }
+.cover-color-row input[type="color"] { width: 23px; height: 23px; padding: 0; border: 0; border-radius: 50%; overflow: hidden; }
+.cover-style-preview { width: 100%; height: 62px; margin-top: .6rem; border-radius: 10px; object-fit: cover; }
+.cover-style-save { width: 100%; margin-top: .65rem; border-radius: 10px; padding: .52rem; background: #7664c6; color: #fff; font-size: 10px; font-weight: 800; }
+.library-grid .cover-style-trigger { right: .42rem; bottom: .42rem; }
+.library-book-icon img, .set-item-icon img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+.set-item { position: relative; }
+.set-item .cover-style-trigger { right: .48rem; bottom: .45rem; }
+.dark .cover-style-popover { border-color: rgba(205,211,255,.14); background: #1b2340; color: #eef1fb; }
+.dark .cover-image-input { background: rgba(50,43,87,.8); color: #c4b9fb; }
+.dark .cover-style-trigger { background: rgba(17,23,44,.88); color: #c6bafb; }
