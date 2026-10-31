@@ -381,3 +381,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
   .sky-moon { top: 4.75rem; right: 2vw; }
   .sky-moon .moon-disc::after { display: none !important; }
 }
+
+/* Render the true phase silhouette with transparent cut-outs, never a dark painted shadow. */
+.sky-moon .moon-disc { clip-path: circle(50% at 50% 50%); }
+.sky-moon .moon-disc-0 { background: transparent !important; box-shadow: none !important; }
+.sky-moon .moon-disc-1 { clip-path: ellipse(20% 50% at 76% 50%); }
+.sky-moon .moon-disc-2 { clip-path: inset(0 0 0 50%); }
+.sky-moon .moon-disc-3 { clip-path: ellipse(42% 50% at 65% 50%); }
+.sky-moon .moon-disc-4 { clip-path: circle(50% at 50% 50%); }
+.sky-moon .moon-disc-5 { clip-path: ellipse(42% 50% at 35% 50%); }
+.sky-moon .moon-disc-6 { clip-path: ellipse(48% 50% at 42% 50%); }
+.sky-moon .moon-disc-7 { clip-path: ellipse(20% 50% at 24% 50%); }
