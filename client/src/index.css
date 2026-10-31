@@ -373,3 +373,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
   .sky-moon .moon-disc-1::after, .sky-moon .moon-disc-2::after, .sky-moon .moon-disc-3::after { right: -55px; }
   .sky-moon .moon-disc-5::after, .sky-moon .moon-disc-6::after, .sky-moon .moon-disc-7::after { left: -55px; }
 }
+
+/* Keep only the luminous part of the moon and place it further into the upper-right sky. */
+.sky-moon { top: clamp(3rem, 7vh, 5.5rem); right: clamp(.5rem, 3vw, 3rem); }
+.sky-moon .moon-disc::after { display: none !important; }
+@media (max-width: 520px) {
+  .sky-moon { top: 4.75rem; right: 2vw; }
+  .sky-moon .moon-disc::after { display: none !important; }
+}
