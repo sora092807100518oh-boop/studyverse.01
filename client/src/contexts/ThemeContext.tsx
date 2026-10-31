@@ -25,14 +25,20 @@ export function ThemeProvider({
     const hour = new Date().getHours();
     return hour >= 6 && hour < 18 ? "light" : "dark";
   };
+  const readManualTheme = (): Theme | null => {
+    try {
+      const saved = localStorage.getItem("studyverse-theme-preference");
+      return saved === "light" || saved === "dark" ? saved : null;
+    } catch {
+      return null;
+    }
+  };
+  const [manualTheme, setManualTheme] = useState<Theme | null>(() => readManualTheme());
   const [theme, setTheme] = useState<Theme>(() => {
-    return getScheduledTheme();
+    return readManualTheme() ?? getScheduledTheme();
   });
 
   useEffect(() => {
-    const syncTheme = () => setTheme(getScheduledTheme());
-    syncTheme();
-    const timer = window.setInterval(syncTheme, 60_000);
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
@@ -40,15 +46,22 @@ export function ThemeProvider({
       root.classList.remove("dark");
     }
 
-    if (switchable) {
-      localStorage.setItem("theme", theme);
+    if (!manualTheme) {
+      const syncTheme = () => setTheme(getScheduledTheme());
+      syncTheme();
+      const timer = window.setInterval(syncTheme, 60_000);
+      return () => window.clearInterval(timer);
     }
-    return () => window.clearInterval(timer);
-  }, [theme, switchable]);
+  }, [theme, manualTheme]);
 
   const toggleTheme = switchable
     ? () => {
-        setTheme(prev => (prev === "light" ? "dark" : "light"));
+        setTheme(prev => {
+          const next = prev === "light" ? "dark" : "light";
+          setManualTheme(next);
+          try { localStorage.setItem("studyverse-theme-preference", next); } catch { /* 保存不可の環境では現在の表示だけ切り替える */ }
+          return next;
+        });
       }
     : undefined;
 
