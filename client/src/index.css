@@ -359,3 +359,17 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 .sky-moon .moon-disc-1::after, .sky-moon .moon-disc-2::after, .sky-moon .moon-disc-3::after { right: calc(clamp(58px, 9vw, 96px) * -.42); }
 .sky-moon .moon-disc-5::after, .sky-moon .moon-disc-6::after, .sky-moon .moon-disc-7::after { left: calc(clamp(58px, 9vw, 96px) * -.42); }
 @media (max-width: 520px) { .sky-moon { top: 5rem; right: 1rem; opacity: .58; } }
+
+/* Mobile moon overlay: visible above cards/buttons while remaining transparent and non-interactive. */
+.sky-moon { z-index: 20; opacity: .22; mix-blend-mode: screen; }
+.sky-moon .moon-disc { width: clamp(92px, 34vw, 170px); height: clamp(92px, 34vw, 170px); opacity: .72; }
+.sky-moon .moon-disc::after { top: -12px; width: calc(clamp(92px, 34vw, 170px) + 18px); height: calc(clamp(92px, 34vw, 170px) + 18px); }
+.sky-moon .moon-disc-1::after, .sky-moon .moon-disc-2::after, .sky-moon .moon-disc-3::after { right: calc(clamp(92px, 34vw, 170px) * -.42); }
+.sky-moon .moon-disc-5::after, .sky-moon .moon-disc-6::after, .sky-moon .moon-disc-7::after { left: calc(clamp(92px, 34vw, 170px) * -.42); }
+@media (max-width: 520px) {
+  .sky-moon { top: 8rem; right: 8vw; opacity: .24; }
+  .sky-moon .moon-disc { width: 132px; height: 132px; }
+  .sky-moon .moon-disc::after { width: 146px; height: 146px; }
+  .sky-moon .moon-disc-1::after, .sky-moon .moon-disc-2::after, .sky-moon .moon-disc-3::after { right: -55px; }
+  .sky-moon .moon-disc-5::after, .sky-moon .moon-disc-6::after, .sky-moon .moon-disc-7::after { left: -55px; }
+}
