@@ -331,3 +331,18 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
   .home-timer-toggle { padding-inline: 10px; }
   .home-timer-controls output { font-size: 14px; }
 }
+
+/* Night ambience and current moon phase */
+.moon-phase-badge { display: inline-flex; align-items: center; gap: 4px; min-width: 42px; color: #74809a; font-size: 8px; font-weight: 800; white-space: nowrap; }
+.moon-disc { position: relative; display: block; width: 20px; height: 20px; overflow: hidden; border-radius: 50%; background: #d7dbea; box-shadow: 0 0 8px rgba(229, 232, 255, .32); }
+.moon-disc::after { content: ""; position: absolute; top: -2px; width: 24px; height: 24px; border-radius: 50%; background: #101a35; }
+.moon-disc-0::after, .moon-disc-4::after { display: none; }
+.moon-disc-1::after, .moon-disc-2::after, .moon-disc-3::after { right: -12px; }
+.moon-disc-5::after, .moon-disc-6::after, .moon-disc-7::after { left: -12px; }
+.dark .moon-phase-badge { color: #b8c4e2; }
+.dark .moon-disc { background: #fff6c9; box-shadow: 0 0 10px rgba(255, 243, 178, .38); }
+.dark .moon-disc::after { background: #101a35; }
+.dark .star-field { opacity: .34; animation: stars-breathe 8s ease-in-out infinite alternate; }
+@keyframes stars-breathe { from { opacity: .25; } to { opacity: .42; } }
+.modal-surface { box-sizing: border-box; }
+@media (max-width: 420px) { .modal-surface { border-radius: 22px; } }

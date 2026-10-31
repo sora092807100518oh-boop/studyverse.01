@@ -21,15 +21,18 @@ export function ThemeProvider({
   defaultTheme = "light",
   switchable = false,
 }: ThemeProviderProps) {
+  const getScheduledTheme = (): Theme => {
+    const hour = new Date().getHours();
+    return hour >= 6 && hour < 18 ? "light" : "dark";
+  };
   const [theme, setTheme] = useState<Theme>(() => {
-    if (switchable) {
-      const stored = localStorage.getItem("theme");
-      return (stored as Theme) || defaultTheme;
-    }
-    return defaultTheme;
+    return getScheduledTheme();
   });
 
   useEffect(() => {
+    const syncTheme = () => setTheme(getScheduledTheme());
+    syncTheme();
+    const timer = window.setInterval(syncTheme, 60_000);
     const root = document.documentElement;
     if (theme === "dark") {
       root.classList.add("dark");
@@ -40,6 +43,7 @@ export function ThemeProvider({
     if (switchable) {
       localStorage.setItem("theme", theme);
     }
+    return () => window.clearInterval(timer);
   }, [theme, switchable]);
 
   const toggleTheme = switchable
