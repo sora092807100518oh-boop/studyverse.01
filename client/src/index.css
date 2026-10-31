@@ -346,3 +346,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 @keyframes stars-breathe { from { opacity: .25; } to { opacity: .42; } }
 .modal-surface { box-sizing: border-box; }
 @media (max-width: 420px) { .modal-surface { border-radius: 22px; } }
+
+/* The moon and stars live in the night-sky background, not in the account controls. */
+.sky-shell { position: relative; isolation: isolate; }
+.sky-shell > .star-field, .sky-moon { z-index: -1; }
+.sky-moon { display: none; position: fixed; top: clamp(4.5rem, 12vh, 9rem); right: clamp(1.5rem, 10vw, 10rem); pointer-events: none; opacity: .82; filter: drop-shadow(0 0 22px rgba(255, 244, 188, .18)); }
+.dark .sky-moon { display: block; }
+.sky-moon .moon-phase-label { display: none; }
+.sky-moon .moon-disc { width: clamp(58px, 9vw, 96px); height: clamp(58px, 9vw, 96px); background: #fff6c9; box-shadow: 0 0 28px rgba(255, 244, 188, .45), 0 0 70px rgba(188, 206, 255, .12); }
+.sky-moon .moon-disc::after { top: -8px; width: calc(clamp(58px, 9vw, 96px) + 12px); height: calc(clamp(58px, 9vw, 96px) + 12px); background: #101a35; }
+.sky-moon .moon-disc-0::after, .sky-moon .moon-disc-4::after { display: none; }
+.sky-moon .moon-disc-1::after, .sky-moon .moon-disc-2::after, .sky-moon .moon-disc-3::after { right: calc(clamp(58px, 9vw, 96px) * -.42); }
+.sky-moon .moon-disc-5::after, .sky-moon .moon-disc-6::after, .sky-moon .moon-disc-7::after { left: calc(clamp(58px, 9vw, 96px) * -.42); }
+@media (max-width: 520px) { .sky-moon { top: 5rem; right: 1rem; opacity: .58; } }
