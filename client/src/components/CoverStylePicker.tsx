@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ImagePlus, Palette, Settings2, X } from "lucide-react";
+import { ImagePlus, Palette, RotateCcw, Settings2, X } from "lucide-react";
 
 type CoverStyle = { image?: string; color?: string };
 
@@ -15,35 +15,33 @@ export function readCoverStyles(namespace: string): Record<string, CoverStyle> {
   }
 }
 
-function saveCoverStyle(namespace: string, id: string, style: CoverStyle) {
+function emitChange(namespace: string, id: string, style?: CoverStyle) {
   const styles = readCoverStyles(namespace);
-  styles[id] = style;
+  if (style && (style.image || style.color)) styles[id] = style;
+  else delete styles[id];
   window.localStorage.setItem(`studyverse-cover-styles:${namespace}`, JSON.stringify(styles));
-  window.dispatchEvent(new CustomEvent(COVER_STYLE_EVENT, { detail: { namespace, id, style } }));
+  window.dispatchEvent(new CustomEvent(COVER_STYLE_EVENT, { detail: { namespace, id, style: style ?? {} } }));
 }
 
 export function CoverStylePicker({ namespace, itemId, style }: { namespace: string; itemId: string; style?: CoverStyle }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<CoverStyle>(style ?? {});
   const updateImage = (file: File | undefined) => {
-    if (!file) return;
-    if (!file.type.startsWith("image/")) return;
+    if (!file || !file.type.startsWith("image/")) return;
     const reader = new FileReader();
     reader.onload = () => setDraft(current => ({ ...current, image: typeof reader.result === "string" ? reader.result : undefined }));
     reader.readAsDataURL(file);
   };
-  const apply = () => {
-    saveCoverStyle(namespace, itemId, draft);
-    setOpen(false);
-  };
+  const apply = () => { emitChange(namespace, itemId, draft); setOpen(false); };
+  const reset = () => { emitChange(namespace, itemId); setDraft({}); setOpen(false); };
   return <>
-    <button type="button" className="cover-style-trigger" aria-label="表紙を設定" onClick={event => { event.stopPropagation(); setDraft(style ?? {}); setOpen(true); }}><Settings2 className="h-3.5 w-3.5" /></button>
-    {open && <div className="cover-style-popover" role="dialog" aria-label="表紙を設定" onClick={event => event.stopPropagation()}>
-      <div className="flex items-center justify-between gap-2"><b>表紙を設定</b><button type="button" aria-label="表紙設定を閉じる" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button></div>
+    <button type="button" className="cover-style-trigger" aria-label="表紙を編集" onClick={event => { event.stopPropagation(); setDraft(style ?? {}); setOpen(true); }}><Settings2 className="h-3.5 w-3.5" /></button>
+    {open && <div className="cover-style-popover" role="dialog" aria-label="表紙を編集" onClick={event => event.stopPropagation()}>
+      <div className="flex items-center justify-between gap-2"><b>表紙を編集</b><button type="button" aria-label="表紙設定を閉じる" onClick={() => setOpen(false)}><X className="h-4 w-4" /></button></div>
       <label className="cover-image-input"><ImagePlus className="h-4 w-4" />画像を選ぶ<input type="file" accept="image/*" onChange={event => updateImage(event.target.files?.[0])} /></label>
       <div className="cover-color-row"><Palette className="h-4 w-4" />{COVER_COLORS.map(color => <button type="button" key={color} aria-label={`背景色 ${color}`} className={`cover-color ${draft.color === color ? "is-active" : ""}`} style={{ backgroundColor: color }} onClick={() => setDraft(current => ({ ...current, color }))} />)}<input aria-label="好きな背景色" type="color" value={draft.color ?? "#7664c6"} onChange={event => setDraft(current => ({ ...current, color: event.target.value }))} /></div>
       {draft.image && <img src={draft.image} alt="表紙プレビュー" className="cover-style-preview" />}
-      <button type="button" className="cover-style-save" onClick={apply}>保存する</button>
+      <div className="cover-style-actions"><button type="button" className="cover-style-reset" onClick={reset}><RotateCcw className="h-3.5 w-3.5" />リセット</button><button type="button" className="cover-style-save" onClick={apply}>保存する</button></div>
     </div>}
   </>;
 }
