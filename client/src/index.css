@@ -454,3 +454,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 .dark .set-item .favorite-button { background: rgba(16,22,43,.78); }
 .dark .set-grid .set-item { background: linear-gradient(145deg, rgba(31,39,69,.96), rgba(20,27,51,.93)); }
 @media (max-width: 380px) { .set-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; } .set-grid .set-item-main { min-height: 125px; padding: .7rem; } }
+
+/* Keep the book cover editor above its card and expose the native color picker. */
+.library-item, .library-grid .library-book-card { overflow: visible; }
+.library-grid .library-book-card .library-item-main { border-radius: 17px; }
+.library-page .cover-style-popover { right: .5rem; bottom: 2.9rem; }
+.cover-custom-color { position: relative; display: grid; width: 22px; height: 22px; place-items: center; border: 1px dashed #8b82bf; border-radius: 50%; background: #fff; color: #7664c6; font-size: 15px; font-weight: 900; line-height: 1; cursor: pointer; }
+.cover-custom-color input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.dark .cover-custom-color { border-color: #b7aaf1; background: #20294a; color: #d4caff; }
