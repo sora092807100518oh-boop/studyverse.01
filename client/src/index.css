@@ -488,3 +488,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 .reorder-arrow-button { display: grid; width: 29px; height: 29px; place-items: center; border: 1px solid rgba(118,100,198,.2); border-radius: 50%; background: #7664c6; color: #fff; font-size: 16px; font-weight: 900; line-height: 1; box-shadow: 0 5px 12px rgba(60,48,110,.25); }
 .reorder-arrow-button:active { transform: scale(.94); }
 .set-grid .reorder-arrows, .library-grid .reorder-arrows { right: -.6rem; }
+
+@media (max-width: 640px) {
+  .library-grid .cover-style-popover, .set-grid .cover-style-popover {
+    left: auto; right: 0; width: min(300px, calc(100vw - 2rem)); max-width: calc(100vw - 2rem);
+    max-height: min(70vh, 430px); overflow-y: auto;
+  }
+  .library-grid .library-item, .set-grid .set-item { overflow: visible; }
+}

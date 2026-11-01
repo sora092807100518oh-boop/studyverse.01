@@ -1599,9 +1599,14 @@ export async function listMarketItems(userId: number) {
 export async function listMarketRankingItems(userId: number) {
   const db = await getDb();
   if (!db) return [];
-  const rows = await db.select({ item: marketItems, downloadCount: count(marketDownloads.id) }).from(marketItems).leftJoin(marketDownloads, eq(marketDownloads.marketItemId, marketItems.id)).where(eq(marketItems.status, "approved")).groupBy(marketItems.id).orderBy(desc(count(marketDownloads.id)), desc(marketItems.createdAt));
-  const ranked = rows.filter(row => Number(row.downloadCount) > 0).slice(0, 3);
-  return Promise.all(ranked.map(async row => ({ ...(await decorateMarketItem(userId, row.item, db)), downloadCount: Number(row.downloadCount) })));
+  const rows = await db.select({ item: marketItems, downloadCount: count(marketDownloads.id) }).from(marketItems).leftJoin(marketDownloads, eq(marketDownloads.marketItemId, marketItems.id)).where(eq(marketItems.status, "approved")).groupBy(marketItems.id);
+  const decorated = await Promise.all(rows.filter(row => Number(row.downloadCount) > 0).map(async row => ({ ...(await decorateMarketItem(userId, row.item, db)), downloadCount: Number(row.downloadCount) })));
+  decorated.sort((a, b) => b.downloadCount - a.downloadCount || b.averageStars - a.averageStars || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return decorated.slice(0, 3).map((item, index, list) => {
+    const previous = list[index - 1];
+    const sameAsPrevious = previous && previous.downloadCount === item.downloadCount && previous.averageStars === item.averageStars;
+    return { ...item, rank: sameAsPrevious ? index : index + 1 };
+  });
 }
 export async function submitMarketItem(userId: number, input: { wordbookId: number; name: string; price: number; dataUrl: string }) {
   const db = await getDb();
