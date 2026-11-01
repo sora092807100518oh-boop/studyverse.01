@@ -462,3 +462,14 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 .cover-custom-color { position: relative; display: grid; width: 22px; height: 22px; place-items: center; border: 1px dashed #8b82bf; border-radius: 50%; background: #fff; color: #7664c6; font-size: 15px; font-weight: 900; line-height: 1; cursor: pointer; }
 .cover-custom-color input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .dark .cover-custom-color { border-color: #b7aaf1; background: #20294a; color: #d4caff; }
+
+/* Unified, inline-feeling actions for both library and learning-set cards. */
+.cover-actions { position: absolute; top: .58rem; right: .58rem; z-index: 8; display: inline-flex; align-items: center; gap: .3rem; border: 1px solid rgba(117,126,151,.13); border-radius: 11px; padding: .18rem; background: rgba(255,255,255,.72); box-shadow: 0 4px 10px rgba(35,45,75,.08); backdrop-filter: blur(8px); }
+.cover-actions .favorite-button, .cover-actions .cover-style-trigger { position: static; width: 27px; height: 27px; border: 0; border-radius: 8px; background: transparent; box-shadow: none; }
+.cover-actions .cover-style-trigger { color: #7664c6; }
+.cover-actions .cover-style-popover { top: calc(100% + .45rem); right: 0; bottom: auto; }
+.library-item-main { padding-right: 5rem; }
+.library-grid .library-item-main { padding-right: .8rem; }
+.set-grid .set-item-main { padding-right: .8rem; }
+.library-grid .cover-actions, .set-grid .cover-actions { top: .55rem; right: .55rem; }
+.dark .cover-actions { border-color: rgba(205,211,255,.14); background: rgba(16,22,43,.78); }
