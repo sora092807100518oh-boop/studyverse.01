@@ -496,3 +496,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
   }
   .library-grid .library-item, .set-grid .set-item { overflow: visible; }
 }
+
+/* Keep the mobile login introduction readable before the account controls. */
+@media (max-width: 640px) {
+  .login-brand { display: block !important; min-width: 0 !important; text-align: center; }
+  .login-brand .login-mark { margin-inline: auto; }
+  .login-brand .login-lead, .login-brand .login-points { display: block !important; }
+  .login-layout { align-items: start; gap: 1.4rem; padding-top: 2.2rem; padding-bottom: 2.2rem; }
+  .login-form { margin-top: .25rem; }
+}

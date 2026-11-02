@@ -310,6 +310,7 @@ export async function requireGlobalAdmin(userId: number) {
 
 const WORD_BOOK_CREATION_SETTING_KEY = "wordbookCreationDisabled";
 const PERSONAL_CLASSROOM_CODES_SETTING_KEY = "personalClassroomCodes";
+const OAUTH_APPLICATION_BYPASS_SETTING_KEY = "oauthApplicationBypass";
 
 function parsePersonalClassroomCodes(value?: string | null) {
   if (!value) return [] as string[];
@@ -1796,6 +1797,27 @@ export async function clearLoginBackground(userId: number) {
   return { imageUrl: null as string | null };
 }
 
+export async function getOAuthApplicationBypassPolicy(userId?: number) {
+  const db = await getDb();
+  if (!db) return { enabled: false, editable: false };
+  const row = await db.select({ value: siteSettings.value }).from(siteSettings).where(eq(siteSettings.key, OAUTH_APPLICATION_BYPASS_SETTING_KEY)).limit(1);
+  let editable = false;
+  if (userId) {
+    const account = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
+    const profile = await getProfile(userId);
+    editable = account[0]?.role === "admin" || profile?.profile.classroomRole === "owner";
+  }
+  return { enabled: row[0]?.value === "true", editable };
+}
+export async function setOAuthApplicationBypass(userId: number, enabled: boolean) {
+  await requireGlobalAdmin(userId);
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const existing = await db.select({ key: siteSettings.key }).from(siteSettings).where(eq(siteSettings.key, OAUTH_APPLICATION_BYPASS_SETTING_KEY)).limit(1);
+  if (existing[0]) await db.update(siteSettings).set({ value: enabled ? "true" : "false" }).where(eq(siteSettings.key, OAUTH_APPLICATION_BYPASS_SETTING_KEY));
+  else await db.insert(siteSettings).values({ key: OAUTH_APPLICATION_BYPASS_SETTING_KEY, value: enabled ? "true" : "false" });
+  return { enabled };
+}
 export async function requestOAuthClassroomApplication(userId: number, classroomCode?: string) {
   const db = await getDb();
   if (!db) throw new Error("DATABASE_UNAVAILABLE");
@@ -1813,6 +1835,7 @@ export async function requestOAuthClassroomApplication(userId: number, classroom
   if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
   const existingProfile = (await db.select({ id: studentProfiles.id }).from(studentProfiles).where(and(eq(studentProfiles.userId, userId), eq(studentProfiles.classroomId, classroom.id))).limit(1))[0];
   if (existingProfile) return { status: "approved" as const, applicationId: null, classroom: { id: classroom.id, code: classroom.code, name: classroom.name } };
+  if (!normalizedCode && (await getOAuthApplicationBypassPolicy()).enabled) return { status: "approved" as const, applicationId: null, classroom: { id: classroom.id, code: classroom.code, name: classroom.name } };
   const existing = (await db.select().from(oauthClassroomApplications).where(and(eq(oauthClassroomApplications.userId, userId), eq(oauthClassroomApplications.classroomId, classroom.id))).limit(1))[0];
   if (existing) {
     if (existing.status !== "pending") await db.update(oauthClassroomApplications).set({ status: "pending", requestedAt: new Date(), reviewedAt: null, reviewedBy: null }).where(eq(oauthClassroomApplications.id, existing.id));
@@ -1886,7 +1909,7 @@ export async function authenticateWithOAuth(userId: number, input: { classroomCo
     }
   }
   if (!classroom) throw new Error("CLASSROOM_NOT_FOUND");
-  if (!normalizedCode) {
+  if (!normalizedCode && !(await getOAuthApplicationBypassPolicy()).enabled) {
     const existingProfile = (await db.select({ id: studentProfiles.id }).from(studentProfiles).where(and(eq(studentProfiles.userId, userId), eq(studentProfiles.classroomId, classroom.id))).limit(1))[0];
     if (!existingProfile) {
       const application = (await db.select({ status: oauthClassroomApplications.status }).from(oauthClassroomApplications).where(and(eq(oauthClassroomApplications.userId, userId), eq(oauthClassroomApplications.classroomId, classroom.id))).limit(1))[0];
