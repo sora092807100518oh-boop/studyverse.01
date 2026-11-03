@@ -6,13 +6,16 @@ import { revokePinSession, revokeSiteAdminSession, revokeTeacherAdminSession } f
 import { createGoogleSession, upsertGoogleUser } from "../google-auth";
 import { getSessionCookieOptions } from "./cookies";
 
+export const PUBLIC_APP_ORIGIN = process.env.PUBLIC_APP_ORIGIN ?? "https://tonanstudy-dmdhuxmz.manus.space";
+
 function getOrigin(raw: unknown) {
   if (typeof raw !== "string") return null;
   try {
     const url = new URL(raw);
     if (url.pathname !== "/" || url.search || url.hash) return null;
-    if (url.protocol !== "https:" && !(url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) return null;
-    return url.origin;
+    if (url.origin === PUBLIC_APP_ORIGIN) return url.origin;
+    if (url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname)) return url.origin;
+    return null;
   } catch { return null; }
 }
 
@@ -23,8 +26,8 @@ function errorPage(message: string) {
 export function registerGoogleOAuthRoutes(app: Express) {
   app.get("/api/google/oauth/start", (req, res) => {
     const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
-    const origin = getOrigin(req.query.origin);
-    if (!clientId || !origin) return res.status(400).type("html").send(errorPage("Googleログインの設定を確認できませんでした。最初からやり直してください。"));
+    const origin = getOrigin(req.query.origin) ?? (req.hostname === new URL(PUBLIC_APP_ORIGIN).hostname ? PUBLIC_APP_ORIGIN : null);
+    if (!clientId || !origin) return res.status(400).type("html").send(errorPage("Googleログインの設定を確認できませんでした。公開サイトから最初からやり直してください。"));
     const redirectUri = `${origin}/api/google/oauth/callback`;
     const nonce = randomUUID();
     const state = encodeOAuthState({ redirectUri, nonce });
@@ -48,7 +51,7 @@ export function registerGoogleOAuthRoutes(app: Express) {
     const options = getSessionCookieOptions(req);
     let origin: string | null = null;
     try { origin = redirectUri ? new URL(redirectUri).origin : null; } catch { origin = null; }
-    if (!code || !nonce || cookies[GOOGLE_OAUTH_STATE_COOKIE] !== nonce || !origin || redirectUri !== `${origin}/api/google/oauth/callback`) {
+    if (!code || !nonce || cookies[GOOGLE_OAUTH_STATE_COOKIE] !== nonce || !origin || redirectUri !== `${origin}/api/google/oauth/callback` || (origin !== PUBLIC_APP_ORIGIN && !["http://localhost", "http://127.0.0.1"].some(local => origin === local || origin.startsWith(`${local}:`)))) {
       return res.status(403).type("html").send(errorPage("Google認証の確認に失敗しました。最初からログインし直してください。"));
     }
     res.clearCookie(GOOGLE_OAUTH_STATE_COOKIE, { ...options, maxAge: -1 });
@@ -56,11 +59,7 @@ export function registerGoogleOAuthRoutes(app: Express) {
       const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
       const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
       if (!clientId || !clientSecret) throw new Error("GOOGLE_OAUTH_NOT_CONFIGURED");
-      const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: "authorization_code" }),
-      });
+      const tokenResponse = await fetch("https://oauth2.googleapis.com/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: "authorization_code" }) });
       if (!tokenResponse.ok) throw new Error("GOOGLE_TOKEN_EXCHANGE_FAILED");
       const token = await tokenResponse.json() as { access_token?: string };
       if (!token.access_token) throw new Error("GOOGLE_ACCESS_TOKEN_MISSING");

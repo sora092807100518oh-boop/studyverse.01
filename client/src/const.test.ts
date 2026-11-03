@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildGoogleLoginUrl, OAUTH_ENTRY_INTENT_KEY, readOAuthEntryIntent } from "./const";
+import { buildGoogleLoginUrl, OAUTH_ENTRY_INTENT_KEY, PUBLIC_APP_ORIGIN, readOAuthEntryIntent } from "./const";
 
 describe("GoogleログインURL", () => {
   it("現在のoriginからStudyVerseのGoogle OAuth開始URLを作る", () => {
-    const url = new URL(buildGoogleLoginUrl("https://study.example.com/"));
-    expect(url.origin).toBe("https://study.example.com");
+    const url = new URL(buildGoogleLoginUrl("https://preview.example.com/"));
+    expect(url.origin).toBe(PUBLIC_APP_ORIGIN);
     expect(url.pathname).toBe("/api/google/oauth/start");
-    expect(url.searchParams.get("origin")).toBe("https://study.example.com");
+    expect(url.searchParams.get("origin")).toBe(PUBLIC_APP_ORIGIN);
     expect(url.origin).not.toBe("https://manus.im");
   });
 

@@ -1,9 +1,11 @@
 export type OAuthEntryIntent = { schoolId?: string };
 export const OAUTH_ENTRY_INTENT_KEY = "studyverse-oauth-entry-intent";
+export const PUBLIC_APP_ORIGIN = "https://tonanstudy-dmdhuxmz.manus.space";
 
 export function buildGoogleLoginUrl(origin: string) {
   const normalizedOrigin = origin.replace(/\/$/, "");
-  return `${normalizedOrigin}/api/google/oauth/start?origin=${encodeURIComponent(normalizedOrigin)}`;
+  const loginOrigin = normalizedOrigin.includes("localhost") || normalizedOrigin.includes("127.0.0.1") ? normalizedOrigin : PUBLIC_APP_ORIGIN;
+  return `${loginOrigin}/api/google/oauth/start?origin=${encodeURIComponent(loginOrigin)}`;
 }
 
 export function readOAuthEntryIntent(raw: string | null): OAuthEntryIntent | null {
