@@ -86,6 +86,15 @@ export const teacherAdminSessions = mysqlTable("teacherAdminSessions", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const googleSessions = mysqlTable("googleSessions", {
+  id: int("id").autoincrement().primaryKey(),
+  tokenHash: varchar("tokenHash", { length: 64 }).notNull().unique(),
+  userId: int("userId").notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  revokedAt: timestamp("revokedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const pinLoginAttempts = mysqlTable("pinLoginAttempts", {
   id: int("id").autoincrement().primaryKey(),
   attemptKeyHash: varchar("attemptKeyHash", { length: 64 }).notNull(),

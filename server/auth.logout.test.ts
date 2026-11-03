@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { appRouter, getRequestCookie } from "./routers";
 import type { TrpcContext } from "./_core/context";
-import { COOKIE_NAME, OAUTH_STATE_COOKIE } from "../shared/const";
+import { COOKIE_NAME, GOOGLE_SESSION_COOKIE, OAUTH_STATE_COOKIE } from "@shared/const";
 
 type CookieCall = {
   name: string;
@@ -53,8 +53,8 @@ describe("auth.logout", () => {
     const result = await caller.auth.logout();
 
     expect(result).toEqual({ success: true });
-    expect(clearedCookies).toHaveLength(5);
-    expect(clearedCookies.map(cookie => cookie.name)).toEqual(["studyverse_pin", "studyverse_admin", "studyverse_teacher", COOKIE_NAME, OAUTH_STATE_COOKIE]);
+    expect(clearedCookies).toHaveLength(6);
+    expect(clearedCookies.map(cookie => cookie.name)).toEqual(["studyverse_pin", "studyverse_admin", "studyverse_teacher", GOOGLE_SESSION_COOKIE, COOKIE_NAME, OAUTH_STATE_COOKIE]);
     expect(clearedCookies[0]?.options).toMatchObject({
       maxAge: -1,
       secure: true,

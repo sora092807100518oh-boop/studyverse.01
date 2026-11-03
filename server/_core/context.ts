@@ -1,6 +1,7 @@
 import type { CreateExpressContextOptions } from "@trpc/server/adapters/express";
 import type { User } from "../../drizzle/schema";
 import { getPinSession, getSiteAdminSession, getTeacherAdminSession, getUserById } from "../db";
+import { getGoogleSession } from "../google-auth";
 import { sdk } from "./sdk";
 import type { ActiveMembership } from "../active-membership";
 
@@ -18,8 +19,12 @@ export async function createContext(
   let activeMembership: ActiveMembership | undefined;
   const cookieHeader = opts.req.headers.cookie ?? "";
   const getCookie = (name: string) => cookieHeader.split(";").map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1);
+  const googleToken = getCookie("studyverse_google_session");
+  if (googleToken) {
+    try { user = (await getGoogleSession(googleToken))?.user ?? null; } catch (error) { console.warn("[Google Auth] Session lookup failed", String(error)); }
+  }
   const adminToken = getCookie("studyverse_admin");
-  if (adminToken) {
+  if (!user && adminToken) {
     try { user = (await getSiteAdminSession(adminToken))?.user ?? null; } catch (error) { console.warn("[Site Admin Auth] Session lookup failed", String(error)); }
   }
   if (!user) {

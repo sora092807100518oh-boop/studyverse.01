@@ -136,9 +136,9 @@ describe("OAuthログイン画面", () => {
     expect(screen.getByText("学校IDを入力")).toBeTruthy();
     expect(screen.getByText("学校IDがなければ、空欄のまま個人利用を申請できます。")).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText("例：STAR-2026"), { target: { value: "school-2026" } });
-    fireEvent.click(screen.getByRole("button", { name: "Google／Appleでログイン" }));
+    fireEvent.click(screen.getByRole("button", { name: "Googleでログイン" }));
     expect(gateProps.onOAuthLogin).toHaveBeenCalledWith({ schoolId: "SCHOOL-2026" });
-    expect(screen.getByText(/次のStudyVerse専用認証画面/)).toBeTruthy();
+    expect(screen.getByText(/Googleの認証画面/)).toBeTruthy();
   });
 
   it("OAuth後は学校IDがあれば学校へ、空欄なら個人利用へ進める", async () => {
@@ -157,7 +157,7 @@ describe("OAuthログイン画面", () => {
   it("必要な入力とログイン操作を一つのフォーム内に表示する", () => {
     render(<LoginGate {...gateProps} />);
     expect(screen.getByTestId("login-form")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Google／Appleでログイン" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Googleでログイン" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "学校IDを読み取る" })).toBeTruthy();
   });
 });

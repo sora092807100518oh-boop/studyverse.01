@@ -218,6 +218,13 @@
       "when": 1793251087333,
       "tag": "0030_aspiring_phalanx",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "5",
+      "when": 1793743872003,
+      "tag": "0031_thin_exiles",
+      "breakpoints": true
     }
   ]
 }

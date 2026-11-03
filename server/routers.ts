@@ -11,6 +11,7 @@ import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
 import { sdk } from "./_core/sdk";
 import { COOKIE_NAME, OAUTH_STATE_COOKIE } from "../shared/const";
 import { getSiteAdminSession } from "./db";
+import { revokeGoogleSession } from "./google-auth";
 
 function toUserMessage(error: unknown): never {
   const code = error instanceof Error ? error.message : "";
@@ -188,6 +189,7 @@ export const appRouter = router({
   }),
   auth: router({
     me: publicProcedure.query(async ({ ctx }) => {
+      if (getRequestCookie(ctx.req.headers.cookie, "studyverse_google_session")) return ctx.user;
       try { return await sdk.authenticateRequest(ctx.req); } catch { return null; }
     }),
     logout: publicProcedure.mutation(async ({ ctx }) => {
@@ -195,12 +197,15 @@ export const appRouter = router({
       const pinToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_pin");
       const adminToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_admin");
       const teacherToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_teacher");
+      const googleToken = getRequestCookie(ctx.req.headers.cookie, "studyverse_google_session");
       if (pinToken) await revokePinSession(pinToken);
       if (adminToken) await revokeSiteAdminSession(adminToken);
       if (teacherToken) await revokeTeacherAdminSession(teacherToken);
+      if (googleToken) await revokeGoogleSession(googleToken);
       ctx.res.clearCookie("studyverse_pin", { ...cookieOptions, maxAge: -1 });
       ctx.res.clearCookie("studyverse_admin", { ...cookieOptions, maxAge: -1 });
       ctx.res.clearCookie("studyverse_teacher", { ...cookieOptions, maxAge: -1 });
+      ctx.res.clearCookie("studyverse_google_session", { ...cookieOptions, maxAge: -1 });
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
       ctx.res.clearCookie(OAUTH_STATE_COOKIE, { ...cookieOptions, maxAge: -1 });
       return { success: true } as const;
@@ -215,18 +220,18 @@ export const appRouter = router({
       } catch (error) { return toUserMessage(error); }
     }),
     oauthClassroomLogin: publicProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/).optional() })).mutation(async ({ ctx, input }) => {
-      const account = await sdk.authenticateRequest(ctx.req).catch(() => null);
+      const account = getRequestCookie(ctx.req.headers.cookie, "studyverse_google_session") ? ctx.user : await sdk.authenticateRequest(ctx.req).catch(() => null);
       if (!account) throw new TRPCError({ code: "UNAUTHORIZED", message: "アカウント認証を完了してからログインしてください。" });
       try { const result = await authenticateWithOAuth(account.id, input); const options = getSessionCookieOptions(ctx.req); ctx.res.cookie("studyverse_pin", result.token, { ...options, maxAge: 30 * 24 * 60 * 60 * 1000 }); return { profile: result.profile, classroom: result.classroom, expiresAt: result.expiresAt }; } catch (error) { return toUserMessage(error); }
     }),
     classroomApplication: router({
       status: publicProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/) })).query(async ({ ctx, input }) => {
-        const account = await sdk.authenticateRequest(ctx.req).catch(() => null);
+        const account = getRequestCookie(ctx.req.headers.cookie, "studyverse_google_session") ? ctx.user : await sdk.authenticateRequest(ctx.req).catch(() => null);
         if (!account) return null;
         try { return await getOAuthClassroomApplication(account.id, input.classroomCode); } catch (error) { return toUserMessage(error); }
       }),
       request: publicProcedure.input(z.object({ classroomCode: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9-]+$/).optional() })).mutation(async ({ ctx, input }) => {
-        const account = await sdk.authenticateRequest(ctx.req).catch(() => null);
+        const account = getRequestCookie(ctx.req.headers.cookie, "studyverse_google_session") ? ctx.user : await sdk.authenticateRequest(ctx.req).catch(() => null);
         if (!account) throw new TRPCError({ code: "UNAUTHORIZED", message: "アカウント認証を完了してから申請してください。" });
         try { return await requestOAuthClassroomApplication(account.id, input.classroomCode); } catch (error) { return toUserMessage(error); }
       }),
