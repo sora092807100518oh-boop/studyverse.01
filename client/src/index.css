@@ -450,7 +450,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 .set-grid .set-item-main { display: flex; min-height: 130px; flex: 1; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: .6rem; padding: .85rem .8rem; }
 .set-grid .set-item-icon { width: 52px; height: 68px; border-radius: 7px 11px 11px 7px; box-shadow: inset 5px 0 rgba(255,255,255,.18), 4px 5px 10px rgba(41,52,86,.16); }
 .set-grid .set-item-main b { white-space: normal; line-height: 1.35; }
-.set-grid .set-actions { padding-top: 0; margin-top: auto; }
+.set-grid .set-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); box-sizing: border-box; min-width: 0; padding: 0 .55rem .6rem; margin-top: auto; }
+.set-grid .set-actions button { min-width: 0; width: 100%; padding-inline: 2px; overflow-wrap: anywhere; white-space: normal; line-height: 1.1; }
 .dark .set-item .favorite-button { background: rgba(16,22,43,.78); }
 .dark .set-grid .set-item { background: linear-gradient(145deg, rgba(31,39,69,.96), rgba(20,27,51,.93)); }
 @media (max-width: 380px) { .set-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; } .set-grid .set-item-main { min-height: 125px; padding: .7rem; } }
