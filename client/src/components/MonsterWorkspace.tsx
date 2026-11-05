@@ -51,14 +51,14 @@ export function MonsterGrowthPanel({ liveFocusSeconds = 0 }: { liveFocusSeconds?
         <div className="flex shrink-0 gap-2"><button onClick={() => void dashboard.refetch()} className="rounded-xl border border-white/25 bg-slate-950/35 px-3 py-2 text-xs font-bold text-white backdrop-blur-sm">更新</button><button onClick={() => setHistoryOpen(value => !value)} className="rounded-xl border border-white/25 bg-slate-950/35 px-3 py-2 text-xs font-bold text-white backdrop-blur-sm"><History className="mr-1 inline h-3.5 w-3.5" />育成履歴</button></div>
       </div>
       {data.allThreeCompleted && <div aria-label="3種類育成達成記章" className="mt-3 flex items-center gap-2 self-start rounded-xl border border-amber-100/25 bg-slate-950/45 px-2.5 py-1.5 text-[10px] font-bold text-amber-50 backdrop-blur-sm"><Crown className="h-3.5 w-3.5 text-amber-200"/><span>3種育成達成</span><span className="flex -space-x-1.5">{ACHIEVEMENT_BADGES.map((badge, index) => <img key={badge} src={badge} alt={`達成記章 ${index + 1}`} className="h-6 w-6 rounded-full border border-amber-100/50 bg-white/10 object-contain"/>)}</span></div>}
-      <div className="mt-4 grid flex-1 grid-cols-[minmax(110px,38%)_1fr] gap-4">
-        <div className="flex min-h-44 items-end"><MonsterArtwork images={data.images} eggNumber={active.eggNumber} stage={progress.stage} className="max-h-52 drop-shadow-[0_14px_20px_rgba(0,0,0,.35)]" /></div>
+      <div className="mt-4 grid flex-1 grid-cols-[1fr_minmax(110px,38%)] gap-4">
         <div className="self-end rounded-2xl border border-white/18 bg-slate-950/50 p-3 backdrop-blur-md">
           <p className="text-xs text-amber-100">現在育てている</p><p className="mt-1 text-2xl font-extrabold text-white">進化 {String(progress.stage).padStart(2, "0")} <span className="text-sm font-medium text-emerald-100">/ 13</span></p>
           <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/15"><div className="h-full rounded-full bg-gradient-to-r from-amber-200 via-emerald-200 to-cyan-200 transition-all" style={{ width: `${progress.stageProgress}%` }} /></div>
           <p className="mt-2 font-mono text-[10px] text-amber-50">{progress.stage === 13 ? "最終進化を達成しました" : `次の進化まで ${progress.minutesToNext}分`}</p>
           <p className="mt-1 text-[10px] text-slate-200">学習 {visibleFocusLabel}・ミッション {data.claimedPoints}分</p>
         </div>
+        <div className="flex min-h-44 items-end"><MonsterArtwork images={data.images} eggNumber={active.eggNumber} stage={progress.stage} className="max-h-52 drop-shadow-[0_14px_20px_rgba(0,0,0,.35)]" /></div>
       </div>
       {progress.stage === 13 && <div className="mt-3 rounded-2xl border border-amber-100/30 bg-slate-950/55 p-3 backdrop-blur-md">
         <p className="text-sm font-bold text-amber-50"><Crown className="mr-1 inline h-4 w-4" />最終進化を達成</p>
