@@ -2,7 +2,7 @@ import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-const hooks = vi.hoisted(() => ({ invalidate: vi.fn(), claim: vi.fn(), claimAll: vi.fn(), startNew: vi.fn(), upload: vi.fn() }));
+const hooks = vi.hoisted(() => ({ invalidate: vi.fn(), claim: vi.fn(), claimAll: vi.fn(), startNew: vi.fn(), upload: vi.fn(), saveBackground: vi.fn(), clearBackground: vi.fn() }));
 const dashboard: any = {
   active: { id: 1, eggNumber: "1", active: true, progression: { stage: 1, stageProgress: 0, minutesToNext: 1200 } },
   totalFocusSeconds: 0,
@@ -25,6 +25,9 @@ vi.mock("@/lib/trpc", () => ({
   trpc: {
     useUtils: () => ({ monster: { dashboard: { invalidate: hooks.invalidate }, images: { invalidate: hooks.invalidate } }, market: { wallet: { invalidate: hooks.invalidate } } }),
     monster: {
+      background: { useQuery: () => ({ data: { imageUrl: null }, isLoading: false, refetch: vi.fn() }) },
+      saveBackground: { useMutation: () => ({ mutateAsync: hooks.saveBackground, isPending: false }) },
+      clearBackground: { useMutation: () => ({ mutateAsync: hooks.clearBackground, isPending: false }) },
       dashboard: { useQuery: () => ({ data: dashboard, isLoading: false, refetch: vi.fn() }) },
       startNew: { useMutation: () => ({ mutateAsync: hooks.startNew, isPending: false }) },
       claim: { useMutation: () => ({ mutateAsync: hooks.claim, isPending: false }) },
@@ -53,9 +56,9 @@ const resetDashboard = () => {
 afterEach(() => { cleanup(); vi.clearAllMocks(); resetDashboard(); });
 
 describe("モンスター育成UI", () => {
-  it("初期進化、森林背景、左側のモンスター枠を表示する", () => {
-    render(<MonsterGrowthPanel />);
-    expect(screen.getByAltText("森の中のモンスター育成場所")).toBeTruthy();
+  it("初期進化、ドット柄の既定背景、左側のモンスター枠を表示する", () => {
+    const { container } = render(<MonsterGrowthPanel />);
+    expect(container.querySelector(".monster-growth-panel")).toBeTruthy();
     expect(screen.getByText(/進化 01/)).toBeTruthy();
     expect(screen.getByText(/次の進化まで 1200分/)).toBeTruthy();
     expect(screen.getByText(/画像未登録/)).toBeTruthy();
@@ -99,6 +102,8 @@ describe("モンスター育成UI", () => {
     fireEvent.change(screen.getByLabelText("進化段階"), { target: { value: "13" } });
     expect(screen.getByText("登録先：モンスター3・進化 13")).toBeTruthy();
     expect(screen.getAllByText("未登録")).toHaveLength(42);
+    expect(screen.getByText("育成画面の背景")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "背景をアップロード" })).toBeTruthy();
   });
 
   it("3種完走後には達成記章と卵1から始める周回導線を表示する", async () => {

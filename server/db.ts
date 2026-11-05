@@ -13,6 +13,8 @@ import { buildMissionState, calculateMonsterStage } from "./monster";
 import { storagePut } from "./storage";
 import { getActiveMembership } from "./active-membership";
 
+const MONSTER_BACKGROUND_SETTING_KEY = "monster_background_image";
+
 let _db: ReturnType<typeof drizzle> | null = null;
 
 export async function getDb() {
@@ -1153,6 +1155,37 @@ export async function startNewMonster(userId: number, eggNumber: MonsterEggNumbe
   if (!profileId) throw new Error("MONSTER_PROFILE_CREATE_FAILED");
   await db.update(monsterEggs).set({ consumedAt: new Date(), monsterProfileId: profileId }).where(eq(monsterEggs.id, egg.id));
   return { profileId };
+}
+
+export async function getMonsterBackground() {
+  const db = await getDb();
+  if (!db) return { imageUrl: null };
+  const row = await db.select({ value: siteSettings.value }).from(siteSettings).where(eq(siteSettings.key, MONSTER_BACKGROUND_SETTING_KEY)).limit(1);
+  return { imageUrl: row[0]?.value ?? null };
+}
+
+export async function saveMonsterBackground(userId: number, dataUrl: string) {
+  await requireGlobalAdmin(userId);
+  const match = /^data:(image\/(?:png|jpeg|webp));base64,([a-zA-Z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) throw new Error("MONSTER_BACKGROUND_INVALID");
+  const contentType = match[1]; const buffer = Buffer.from(match[2], "base64");
+  if (!buffer.length || buffer.length > 5_000_000) throw new Error("MONSTER_BACKGROUND_INVALID");
+  const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const uploaded = await storagePut(`settings/monster-background-${randomUUID()}.${extension}`, buffer, contentType);
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  const existing = await db.select({ key: siteSettings.key }).from(siteSettings).where(eq(siteSettings.key, MONSTER_BACKGROUND_SETTING_KEY)).limit(1);
+  if (existing[0]) await db.update(siteSettings).set({ value: uploaded.url }).where(eq(siteSettings.key, MONSTER_BACKGROUND_SETTING_KEY));
+  else await db.insert(siteSettings).values({ key: MONSTER_BACKGROUND_SETTING_KEY, value: uploaded.url });
+  return { imageUrl: uploaded.url };
+}
+
+export async function clearMonsterBackground(userId: number) {
+  await requireGlobalAdmin(userId);
+  const db = await getDb();
+  if (!db) throw new Error("DATABASE_UNAVAILABLE");
+  await db.delete(siteSettings).where(eq(siteSettings.key, MONSTER_BACKGROUND_SETTING_KEY));
+  return { success: true };
 }
 
 export async function uploadMonsterImage(userId: number, input: { slotKey: string; imageType: "egg" | "evolution"; eggNumber?: number; evolutionStage?: number; dataUrl: string }) {
