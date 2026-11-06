@@ -519,3 +519,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 .sky-moon .moon-svg-base { fill: transparent; }
 .sky-moon .moon-svg-lit { fill: #fff6c9; }
 .dark .moon-phase-badge .moon-svg { filter: drop-shadow(0 0 10px rgba(255, 243, 178, .38)); }
+
+/* Cover editors may float over the card and neighboring bookshelf items. */
+.library-item:has(.cover-style-popover), .set-item:has(.cover-style-popover) { z-index: 100; }
+.library-item:has(.cover-style-popover) .cover-style-popover, .set-item:has(.cover-style-popover) .cover-style-popover { z-index: 120; }
