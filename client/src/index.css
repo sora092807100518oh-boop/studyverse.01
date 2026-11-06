@@ -510,3 +510,12 @@ button:focus-visible, input:focus-visible { outline: 2px solid #79ebe0; outline-
 
 .monster-growth-panel:not([style]) { background-image: radial-gradient(rgba(190, 220, 188, .22) 1px, transparent 1.2px); background-size: 18px 18px; }
 .monster-background-dots { background-color: #243b2d; background-image: radial-gradient(rgba(190, 220, 188, .3) 1px, transparent 1.2px); background-size: 18px 18px; }
+
+/* Stable moon-phase silhouette: one SVG shape avoids stacked pseudo-element overrides. */
+.moon-svg { display: block; width: 20px; height: 20px; overflow: visible; }
+.moon-svg-base { fill: #d7dbea; }
+.moon-svg-lit { fill: #fff6c9; }
+.sky-moon .moon-svg { width: clamp(92px, 34vw, 170px); height: clamp(92px, 34vw, 170px); filter: drop-shadow(0 0 28px rgba(255, 244, 188, .45)); }
+.sky-moon .moon-svg-base { fill: transparent; }
+.sky-moon .moon-svg-lit { fill: #fff6c9; }
+.dark .moon-phase-badge .moon-svg { filter: drop-shadow(0 0 10px rgba(255, 243, 178, .38)); }
