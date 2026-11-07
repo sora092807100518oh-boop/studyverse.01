@@ -7,7 +7,7 @@
     "api/index.ts": {
       "runtime": "nodejs22.x",
       "maxDuration": 60,
-      "includeFiles": ["drizzle/**", "server/**"]
+      "includeFiles": "server/**"
     }
   }
 }
