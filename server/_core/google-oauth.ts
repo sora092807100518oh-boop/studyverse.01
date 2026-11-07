@@ -8,12 +8,21 @@ import { getSessionCookieOptions } from "./cookies";
 
 export const PUBLIC_APP_ORIGIN = process.env.PUBLIC_APP_ORIGIN ?? "https://tonanstudy-dmdhuxmz.manus.space";
 
+function allowedOrigins() {
+  const configured = [
+    PUBLIC_APP_ORIGIN,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL && `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`,
+    process.env.VERCEL_URL && `https://${process.env.VERCEL_URL}`,
+  ];
+  return new Set(configured.filter((value): value is string => Boolean(value)));
+}
+
 function getOrigin(raw: unknown) {
   if (typeof raw !== "string") return null;
   try {
     const url = new URL(raw);
     if (url.pathname !== "/" || url.search || url.hash) return null;
-    if (url.origin === PUBLIC_APP_ORIGIN) return url.origin;
+    if (allowedOrigins().has(url.origin)) return url.origin;
     if (url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname)) return url.origin;
     return null;
   } catch { return null; }
@@ -51,7 +60,7 @@ export function registerGoogleOAuthRoutes(app: Express) {
     const options = getSessionCookieOptions(req);
     let origin: string | null = null;
     try { origin = redirectUri ? new URL(redirectUri).origin : null; } catch { origin = null; }
-    if (!code || !nonce || cookies[GOOGLE_OAUTH_STATE_COOKIE] !== nonce || !origin || redirectUri !== `${origin}/api/google/oauth/callback` || (origin !== PUBLIC_APP_ORIGIN && !["http://localhost", "http://127.0.0.1"].some(local => origin === local || origin.startsWith(`${local}:`)))) {
+    if (!code || !nonce || cookies[GOOGLE_OAUTH_STATE_COOKIE] !== nonce || !origin || redirectUri !== `${origin}/api/google/oauth/callback` || (!allowedOrigins().has(origin) && !["http://localhost", "http://127.0.0.1"].some(local => origin === local || origin.startsWith(`${local}:`)))) {
       return res.status(403).type("html").send(errorPage("Google認証の確認に失敗しました。最初からログインし直してください。"));
     }
     res.clearCookie(GOOGLE_OAUTH_STATE_COOKIE, { ...options, maxAge: -1 });

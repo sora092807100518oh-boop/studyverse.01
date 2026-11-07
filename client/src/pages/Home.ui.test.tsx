@@ -126,19 +126,20 @@ describe("OAuthログイン画面", () => {
     onEnter: vi.fn().mockResolvedValue(undefined),
     onPersonalEnter: vi.fn().mockResolvedValue(undefined),
     onOAuthLogin: vi.fn(),
+    onGoogleLogin: vi.fn(),
     onAdminEnter: vi.fn(),
     onTeacherEnter: vi.fn(),
   };
 
-  it("学校IDを先に入力し、専用認証画面へ進む共通ボタンに引き継ぐ", () => {
+  it("学校IDを先に入力し、Google認証へ引き継ぐ", () => {
     render(<LoginGate {...gateProps} />);
     expect(screen.getByText("① school id")).toBeTruthy();
     expect(screen.getByText("学校IDを入力")).toBeTruthy();
     expect(screen.getByText("学校IDがなければ、空欄のまま個人利用を申請できます。")).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText("例：STAR-2026"), { target: { value: "school-2026" } });
-    fireEvent.click(screen.getByRole("button", { name: "Google／Appleでログイン" }));
-    expect(gateProps.onOAuthLogin).toHaveBeenCalledWith({ schoolId: "SCHOOL-2026" });
-    expect(screen.getByText(/次のStudyVerse専用認証画面でGoogleまたはAppleを選んでください。認証後はこの画面へ戻ります。/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Googleでログイン" }));
+    expect(gateProps.onGoogleLogin).toHaveBeenCalledWith({ schoolId: "SCHOOL-2026" });
+    expect(screen.getByText("Googleの認証後、このStudyVerseへ戻ります。")).toBeTruthy();
   });
 
   it("OAuth後は学校IDがあれば学校へ、空欄なら個人利用へ進める", async () => {
@@ -157,7 +158,7 @@ describe("OAuthログイン画面", () => {
   it("必要な入力とログイン操作を一つのフォーム内に表示する", () => {
     render(<LoginGate {...gateProps} />);
     expect(screen.getByTestId("login-form")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Google／Appleでログイン" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Googleでログイン" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "学校IDを読み取る" })).toBeTruthy();
   });
 });

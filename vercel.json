@@ -9,5 +9,15 @@
       "maxDuration": 60,
       "includeFiles": "server/**"
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/manus-storage/:path*",
+      "destination": "/api/index"
+    }
+  ]
 }

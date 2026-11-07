@@ -36,3 +36,10 @@ export function startLogin(intent: OAuthEntryIntent) {
   document.cookie = `${OAUTH_STATE_COOKIE}=${nonce}; Path=/; Max-Age=600; SameSite=None; Secure`;
   window.location.assign(url);
 }
+
+export function startGoogleLogin(intent: OAuthEntryIntent) {
+  sessionStorage.setItem(OAUTH_ENTRY_INTENT_KEY, JSON.stringify(intent));
+  const url = new URL("/api/google/oauth/start", window.location.origin);
+  url.searchParams.set("origin", window.location.origin);
+  window.location.assign(url.toString());
+}
